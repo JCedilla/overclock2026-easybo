@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EasyBo | Student Record Vault & Taglish AI Buddy</title>
-  <meta name="description" content="Scan receipts and school memos, verify them, and keep a clean student record vault. Powered by Lumen OCR and Lumen AI Chat." />
+  <title>EasyBo | Your school papers, sorted</title>
+  <meta name="description" content="Scan receipts and school memos, track payments and clearance, and ask questions in Taglish." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -21,7 +21,7 @@
   <a class="skip-link" href="#viewRoot">Skip to content</a>
 
   <div class="app">
-    <!-- Sidebar -->
+    <!-- Sidebar (desktop) -->
     <aside class="sidebar" id="sidebar" aria-label="Primary">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">EB</div>
@@ -31,28 +31,28 @@
         </div>
       </div>
 
-      <nav class="nav" aria-label="Views">
-        <a href="#dashboard" class="nav-item" data-view="dashboard"><i data-lucide="layout-dashboard"></i><span>Overview</span></a>
-        <a href="#scanner" class="nav-item" data-view="scanner"><i data-lucide="scan-line"></i><span>Scan &amp; Verify</span></a>
-        <a href="#vault" class="nav-item" data-view="vault"><i data-lucide="folder-lock"></i><span>Record Vault</span></a>
-        <a href="#tracker" class="nav-item" data-view="tracker"><i data-lucide="list-checks"></i><span>Clearance Tracker</span><span class="nav-count" id="navPending" hidden>0</span></a>
+      <nav class="nav" aria-label="Main">
+        <a href="#dashboard" class="nav-item" data-view="dashboard"><i data-lucide="house"></i><span>Home</span></a>
+        <a href="#scanner" class="nav-item" data-view="scanner"><i data-lucide="scan-line"></i><span>Scan</span></a>
+        <a href="#vault" class="nav-item" data-view="vault"><i data-lucide="folder"></i><span>My Documents</span></a>
+        <a href="#tracker" class="nav-item" data-view="tracker"><i data-lucide="list-checks"></i><span>Clearance &amp; Payments</span><span class="nav-count" id="navPending" hidden>0</span></a>
         <a href="#buddy" class="nav-item" data-view="buddy"><i data-lucide="message-circle"></i><span>Ask EasyBo</span></a>
       </nav>
 
-      <div class="sidebar-foot">
-        <button class="nav-item nav-btn" id="themeBtn" data-action="toggle-theme" type="button">
-          <i data-lucide="moon"></i><span>Dark theme</span>
-        </button>
-        <p class="foot-note">Powered by Lumen OCR &amp; Lumen AI Chat</p>
+      <div class="partner-badge" aria-label="Pilot partner and Sustainable Development Goals">
+        <p class="pb-label">Pilot partner</p>
+        <p class="pb-name">PLP Student Affairs</p>
+        <div class="pb-sdgs">
+          <span class="sdg sdg4">SDG 4</span>
+          <span class="sdg sdg10">SDG 10</span>
+        </div>
+        <p class="pb-desc">Quality Education and Reduced Inequalities</p>
       </div>
     </aside>
-    <div class="scrim" data-action="close-sidebar" hidden></div>
 
     <div class="shell">
-      <!-- Top context bar -->
+      <!-- Top bar -->
       <header class="topbar">
-        <button class="icon-btn menu-btn" data-action="open-sidebar" type="button" aria-label="Open navigation"><i data-lucide="menu"></i></button>
-
         <div class="student-switch">
           <i data-lucide="graduation-cap" aria-hidden="true"></i>
           <label for="studentSelect" class="sr-only">Student profile</label>
@@ -61,30 +61,44 @@
 
         <div class="topbar-right">
           <div class="popover-wrap">
-            <button class="pill pill-quiet" data-action="toggle-partner" type="button" aria-haspopup="true" aria-expanded="false" id="partnerBtn">
-              <i data-lucide="handshake"></i><span class="hide-sm">Pilot partner</span>
+            <button class="btn btn-ghost" data-action="toggle-demo" type="button" id="demoBtn" aria-haspopup="true" aria-expanded="false">
+              <i data-lucide="wrench"></i><span>Demo tools</span>
             </button>
-            <div class="popover" id="partnerPop" hidden role="dialog" aria-label="Pilot partner and SDG">
-              <p class="pop-label">Pilot Partner</p>
-              <p class="pop-strong">PLP Student Affairs</p>
-              <p class="pop-label">Aligned goals</p>
-              <p class="pop-strong">UN SDG 4 &amp; 10</p>
-              <p class="pop-muted">Quality education and reduced inequalities: free, organized records for every student.</p>
+            <div class="popover" id="demoPop" hidden role="dialog" aria-label="Demo tools">
+              <p class="pop-title">Demo tools</p>
+              <p class="pop-muted">For presenters. Students can ignore this.</p>
+
+              <div class="pop-row">
+                <span id="apiModeLabel" class="pop-row-label">Checking…</span>
+                <button class="switch" id="mockSwitch" role="switch" aria-checked="false" aria-labelledby="apiModeLabel" data-action="toggle-mock" type="button"><span class="knob"></span></button>
+              </div>
+              <p class="pop-hint">Mock Mode uses no Lumen credits.</p>
+
+              <div class="pop-actions">
+                <button class="btn btn-ghost" data-action="load-demo" type="button"><i data-lucide="sparkles"></i>Load Demo Data</button>
+                <button class="btn btn-ghost btn-danger-text" data-action="reset-demo" type="button"><i data-lucide="rotate-ccw"></i>Reset Demo</button>
+                <button class="btn btn-ghost" id="themeBtn" data-action="toggle-theme" type="button"><i data-lucide="moon"></i><span>Dark theme</span></button>
+              </div>
+
+              <hr class="divider" />
+              <p class="pop-hint">Pilot partner: PLP Student Affairs<br />UN SDG 4 and SDG 10</p>
             </div>
           </div>
-
-          <div class="api-toggle" id="apiToggleWrap">
-            <button class="switch" id="mockSwitch" role="switch" aria-checked="false" aria-labelledby="apiModeLabel" data-action="toggle-mock" type="button"><span class="knob"></span></button>
-            <span id="apiModeLabel" class="api-label">Checking…</span>
-          </div>
-
-          <button class="btn btn-ghost btn-sm" data-action="load-demo" type="button"><i data-lucide="sparkles"></i><span class="hide-sm">Load Demo Data</span></button>
         </div>
       </header>
 
       <main id="viewRoot" class="view" tabindex="-1" aria-live="polite"></main>
     </div>
   </div>
+
+  <!-- Bottom tab bar (phones) -->
+  <nav class="tabbar" aria-label="Main">
+    <a href="#dashboard" class="tab-item" data-view="dashboard"><i data-lucide="house"></i><span>Home</span></a>
+    <a href="#scanner" class="tab-item" data-view="scanner"><i data-lucide="scan-line"></i><span>Scan</span></a>
+    <a href="#vault" class="tab-item" data-view="vault"><i data-lucide="folder"></i><span>Documents</span></a>
+    <a href="#tracker" class="tab-item" data-view="tracker"><i data-lucide="list-checks"></i><span>Clearance</span></a>
+    <a href="#buddy" class="tab-item" data-view="buddy"><i data-lucide="message-circle"></i><span>Ask</span></a>
+  </nav>
 
   <div id="modalRoot"></div>
   <div id="toasts" class="toasts" role="status" aria-live="polite"></div>

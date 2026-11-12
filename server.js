@@ -66,6 +66,112 @@ function extractTextFromPagePayload(pageData) {
   return JSON.stringify(root, null, 2);
 }
 
+// ─── MOCK MODE HELPERS (zero Lumen credits) ──────────────────────
+// Mock OCR returns a realistic school paper chosen by file name. The receipt
+// deliberately contains one classic scanner misread ("2O26" with a letter O)
+// so the "Please check" flow can be demonstrated without live credits.
+function mockOcrText(fileName = '') {
+  const header =
+    `PAMANTASAN NG LUNGSOD NG PASIG (PLP)\n`;
+  if (/memo|clearance|permit|notice-of-exam/i.test(fileName)) {
+    return header +
+      `OFFICE OF THE UNIVERSITY REGISTRAR\n` +
+      `MEMORANDUM\n` +
+      `Memo No.: REG-MEMO-114 | Date: November 10, 2026\n` +
+      `SUBJECT: FINAL EXAM PERMIT AND CLEARANCE REQUIREMENTS\n` +
+      `To: All 1st Semester Students\n\n` +
+      `Please complete the following before exam week:\n` +
+      `1. Signed Library & Computer Lab Clearance Slip\n` +
+      `2. Updated Certificate of Registration (COR) with Adviser Signature\n` +
+      `3. Submit all papers to the Registrar's Office\n\n` +
+      `Deadline: November 20, 2026`;
+  }
+  if (/scholar|grant|award/i.test(fileName)) {
+    return header +
+      `OFFICE OF STUDENT AFFAIRS AND SCHOLARSHIPS\n` +
+      `NOTICE OF SCHOLARSHIP AWARD\n` +
+      `Reference: SCH-2026-031 | Date: November 3, 2026\n` +
+      `SUBJECT: ACADEMIC EXCELLENCE SCHOLARSHIP, 1ST SEMESTER\n` +
+      `Scholarship Amount Credited: PHP 5,000.00\n\n` +
+      `To keep your scholarship:\n` +
+      `1. Submit the scholarship renewal form\n` +
+      `2. Maintain the required General Weighted Average (GWA)\n\n` +
+      `Deadline: November 30, 2026`;
+  }
+  return header +
+    `OFFICE OF THE UNIVERSITY REGISTRAR & CASHIER\n` +
+    `OFFICIAL RECEIPT\n` +
+    `Document Ref: OR-2O26-99412 | Date: November 12, 2026\n` +
+    `Student Name: Juan Dela Cruz (BSIT 1-A)\n` +
+    `Particulars: Computer Lab & miscellaneous deposit\n` +
+    `Amount Paid: PHP 1,250.00\n` +
+    `Remaining Balance Due: PHP 500.00\n` +
+    `Submission Deadline: November 24, 2026\n\n` +
+    `REQUIREMENTS FOR FINAL EXAM PERMIT:\n` +
+    `1. Signed Library & Computer Lab Clearance Slip\n` +
+    `2. Official Receipt (OR-2026-99412) photocopy\n` +
+    `3. Updated Certificate of Registration (COR) with Adviser Signature`;
+}
+
+const MOCK_MONTHS = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
+function mockToIso(str) {
+  const m = String(str || '').match(/([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/);
+  const month = m && MOCK_MONTHS[m[1].toLowerCase()];
+  return month ? `${m[3]}-${String(month).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}` : null;
+}
+const mockPeso = (n) => '₱' + Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const mockNiceDate = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+const mockTitleCase = (s) => s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\bPlp\b/, 'PLP');
+
+// Reads the (possibly user-corrected) text and builds the same shape as the live AI response.
+function mockOrganize(text, fileName = '') {
+  const grab = (re) => { const m = text.match(re); return m ? m[1].trim() : null; };
+  const num = (s) => (s ? Number(s.replace(/,/g, '')) : 0);
+  const amountPaid = num(grab(/Amount\s+(?:Paid|Credited)[^:\n]*:\s*(?:PHP|₱)?\s*([\d,]+(?:\.\d+)?)/i));
+  const balanceDue = num(grab(/Balance[^:\n]*:\s*(?:PHP|₱)?\s*([\d,]+(?:\.\d+)?)/i));
+  const referenceNo = grab(/(?:Document Ref|Memo No\.?|Reference(?: No\.?)?|Ref\.?)\s*:\s*([A-Z0-9][A-Z0-9-]{3,})/i) || 'N/A';
+  const date = mockToIso(grab(/Date:\s*([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/i)) || new Date().toISOString().slice(0, 10);
+  const deadline = mockToIso(grab(/Deadline:\s*([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/i)) || 'None';
+  const subject = grab(/SUBJECT:\s*(.+)/i);
+  const particulars = grab(/Particulars:\s*(.+)/i);
+  const lower = text.toLowerCase();
+
+  let category = 'Class Note & Memo';
+  if (/scholar/.test(lower)) category = 'Scholarship';
+  else if (/official receipt|amount paid|balance/.test(lower)) category = 'Receipt & Tuition';
+  else if (/clearance|permit|enrol/.test(lower)) category = 'Enrollment & Clearance';
+
+  let title;
+  if (category === 'Receipt & Tuition' && particulars) title = mockTitleCase(particulars) + ' Receipt';
+  else if (subject) title = mockTitleCase(subject);
+  else title = String(fileName || 'Student Document').replace(/\.[^.]+$/, '');
+
+  const steps = [...text.matchAll(/^\s*\d+[.)]\s+(.+)$/gm)].map((m) => m[1].trim());
+  const when = deadline !== 'None' ? mockNiceDate(deadline) : null;
+  const checklist = [];
+  if (balanceDue > 0) checklist.push(`Bayaran ang ${mockPeso(balanceDue)} balance sa Cashier${when ? ` bago mag ${when}` : ''}`);
+  checklist.push(...steps);
+
+  let taglishSummary;
+  if (category === 'Receipt & Tuition') {
+    taglishSummary =
+      `Ito ang opisyal na resibo${referenceNo !== 'N/A' ? ` (${referenceNo})` : ''} na nagkakahalaga ng ${mockPeso(amountPaid)}${particulars ? ` para sa ${particulars}` : ''}. ` +
+      (balanceDue > 0 ? `May natitira ka pang ${mockPeso(balanceDue)} na dapat bayaran${when ? ` bago mag-${when}` : ''}.` : 'Bayad na ang lahat.');
+  } else if (category === 'Scholarship') {
+    taglishSummary = `Na-approve ang scholarship mo${amountPaid ? ` at na-credit ang ${mockPeso(amountPaid)}` : ''}. ${when ? `Kailangan mong tapusin ang mga hakbang bago mag-${when} para hindi mawala ito.` : 'Sundin ang mga hakbang para mapanatili ito.'}`;
+  } else {
+    taglishSummary = `${subject ? mockTitleCase(subject) + ': ' : ''}May ${steps.length} bagay kang kailangang ihanda${when ? ` bago mag-${when}` : ''}. Tingnan ang listahan sa ibaba.`;
+  }
+
+  const studyNotes = [];
+  if (referenceNo !== 'N/A') studyNotes.push(`Reference no. ${referenceNo}, dated ${mockNiceDate(date)}.`);
+  if (amountPaid > 0) studyNotes.push(`Amount on this paper: ${mockPeso(amountPaid)}.`);
+  if (balanceDue > 0) studyNotes.push(`Remaining balance: ${mockPeso(balanceDue)}${when ? `, due ${when}` : ''}.`);
+  if (steps.length) studyNotes.push(`${steps.length} requirement${steps.length === 1 ? '' : 's'} listed on this paper.`);
+
+  return { title, category, referenceNo, date, amountPaid, balanceDue, deadline, taglishSummary, studyNotes, checklist };
+}
+
 // ─── STATUS & MOCK MODE TOGGLE ───────────────────────────────────
 app.get('/api/config', (req, res) => {
   res.json({
@@ -89,34 +195,17 @@ app.post('/api/ocr/upload', upload.single('document'), async (req, res) => {
     }
 
     if (MOCK_MODE) {
-      await sleep(900);
+      await sleep(1600); // feel like real processing so the loading state is visible
       return res.json({
         mock: true,
         documentId: 'mock-doc-' + Date.now(),
         fileName: req.file.originalname,
         status: 'READY',
         pageCount: 1,
-        extractedText:
-          `PAMANTASAN NG LUNGSOD NG PASIG (PLP)\n` +
-          `OFFICE OF THE UNIVERSITY REGISTRAR & CASHIER\n` +
-          `Document Ref: OR-2026-99412 | Date: November 12, 2026\n\n` +
-          `SUBJECT: 1ST SEMESTER FINAL CLEARANCE & LABORATORY FEE NOTICE\n` +
-          `Student Name: Juan Dela Cruz (BSIT 1-A)\n` +
-          `Amount Paid: PHP 1,250.00 (Computer Lab & miscellaneous deposit)\n` +
-          `Remaining Balance Due: PHP 500.00\n` +
-          `Submission Deadline: November 24, 2026\n\n` +
-          `REQUIREMENTS FOR FINAL EXAM PERMIT:\n` +
-          `1. Signed Library & Computer Lab Clearance Slip\n` +
-          `2. Official Receipt (OR-2026-99412) photocopy\n` +
-          `3. Updated Certificate of Registration (COR) with Adviser Signature`,
-        wordsSample: [
-          { pageNumber: 1, wordIndex: 0, text: 'OR-2026-99412' },
-          { pageNumber: 1, wordIndex: 1, text: '1,250.00' },
-          { pageNumber: 1, wordIndex: 2, text: 'November 24, 2026' }
-        ]
+        extractedText: mockOcrText(req.file.originalname),
+        wordsSample: []
       });
     }
-
     const allowedTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff', 'image/webp'];
     const mediaType = allowedTypes.includes(req.file.mimetype) ? req.file.mimetype : 'image/jpeg';
     const encodedName = encodeURIComponent(req.file.originalname.slice(0, 200));
@@ -281,34 +370,9 @@ app.post('/api/chat/organize', async (req, res) => {
     }
 
     if (MOCK_MODE) {
-      await sleep(700);
-      return res.json({
-        mock: true,
-        structured: {
-          title: '1st Sem Final Clearance & Lab Fee Receipt',
-          category: 'Receipt & Clearance',
-          referenceNo: 'OR-2026-99412',
-          date: '2026-11-12',
-          amountPaid: 1250,
-          balanceDue: 500,
-          deadline: '2026-11-24',
-          taglishSummary:
-            'Ito ay opisyal na resibo (OR-2026-99412) na nagkakahalaga ng ₱1,250.00 para sa Computer Lab at miscellaneous fee, kasama ang paalala para sa Final Exam Permit clearance. May natitira ka pang ₱500.00 balance na kailangang bayaran bago mag-November 24, 2026.',
-          studyNotes: [
-            'Official Receipt #OR-2026-99412 proves ₱1,250.00 payment on Nov 12, 2026.',
-            'Remaining payable balance is ₱500.00 due on or before Nov 24, 2026.',
-            'Three physical requirements must be presented to get the Final Exam Permit.'
-          ],
-          checklist: [
-            'Magpa-pirma ng Library at Computer Lab Clearance Slip',
-            'Mag-photocopy ng Official Receipt (OR-2026-99412)',
-            'Ihanda ang updated COR na may pirma ng Academic Adviser',
-            'Bayaran ang ₱500.00 remaining balance bago mag Nov 24, 2026'
-          ]
-        }
-      });
+      await sleep(1100);
+      return res.json({ mock: true, structured: mockOrganize(String(verifiedText), fileName) });
     }
-
     const { instanceId, sessionId } = await ensureChatSession(false);
 
     // Keep prompt under 4000 chars per OpenAPI spec
