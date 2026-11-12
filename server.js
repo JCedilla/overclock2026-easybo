@@ -441,17 +441,17 @@ app.post('/api/chat/ask', async (req, res) => {
     }
 
     if (MOCK_MODE) {
-      await sleep(500);
+      await sleep(900);
+      // Sample reply that reflects the question and the student's newest saved document
+      const titles = [...String(contextText || '').matchAll(/^- \[[^\]]+\] (.+?) \(Ref:/gm)].map((m) => m[1]);
+      const q = String(question).slice(0, 120);
       return res.json({
         mock: true,
-        answer:
-          `Base sa iyong verified records sa EasyBo Vault:\n\n` +
-          `• Nakapagbayad ka na ng **₱1,250.00** (OR-2026-99412).\n` +
-          `• Ang kailangan mo na lang bayaran ay **₱500.00** bago ang deadline sa **November 24, 2026**.\n` +
-          `• Huwag kalimutang dalhin ang photocopy ng OR, signed COR, at Lab Clearance slip sa Registrar!`
+        answer: titles.length
+          ? `Sample na sagot ito. Tungkol sa tanong mo na "${q}": nakita ko ang ${titles.length} na document mo, kasama ang **${titles[0]}**. Sa Live mode, mas detalyado at totoong sagot ang makukuha mo.`
+          : `Sample na sagot ito. Wala pa akong nakikitang documents mo, kaya mag-scan ka muna ng resibo o memo. Sa Live mode, mas detalyado at totoong sagot ang makukuha mo.`
       });
     }
-
     const { instanceId, sessionId } = await ensureChatSession(false);
     const combinedMessage = contextText
       ? `Context from my verified student records:\n${String(contextText).slice(0, 2200)}\n\nMy Question (please answer helpfully in simple Taglish/English): ${question}`

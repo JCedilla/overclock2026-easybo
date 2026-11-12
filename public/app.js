@@ -39,11 +39,11 @@
     view: 'dashboard',
     scan: freshScan(),
     chat: [],
-    chatScope: 'vault',
     chatBusy: false,
     vaultQ: '',
     vaultCat: 'ALL',
-    trackerShow: 'pending'
+    drawerId: null,
+    cpTab: 'payments'
   };
 
   // ───────── Helpers ─────────
@@ -83,11 +83,27 @@
   // Escape first, then allow **bold** and line breaks only.
   function richText(s) { return esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>'); }
 
+  // Students never see server or vendor wording. Technical detail goes to the console only.
+  function plainError(raw, status) {
+    const s = String(raw || '');
+    if (/failed to fetch|networkerror|load failed|network request/i.test(s)) return 'We cannot reach the server. Please check your internet connection and try again.';
+    if (/no file uploaded/i.test(s)) return 'Please choose a photo or PDF first.';
+    if (/ocr failed|unprocess|could not read|no text/i.test(s) || status === 422) return 'We could not read that file. Try a clear, well-lit photo with the whole paper showing.';
+    if (/timed? ?out|too long/i.test(s)) return 'That took too long. Please try again.';
+    if (/too large|file ?size|10 ?mib|limit/i.test(s) || status === 413) return 'That file is too big. Please use a smaller photo (under 10 MB).';
+    return 'Something went wrong on our side. Please try again in a moment.';
+  }
   async function api(path, opts = {}) {
-    const res = await fetch(path, opts);
+    let res;
+    try { res = await fetch(path, opts); }
+    catch (e) { console.warn(path, e); throw new Error(plainError(e.message)); }
     let data = null;
     try { data = await res.json(); } catch (_) { /* non-JSON body */ }
-    if (!res.ok) throw new Error(data?.error?.message || data?.message || `Request failed (${res.status})`);
+    if (!res.ok) {
+      const raw = data?.error?.message || data?.message || `Request failed (${res.status})`;
+      console.warn(path, res.status, raw);
+      throw new Error(plainError(raw, res.status));
+    }
     return data || {};
   }
   const postJson = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -156,13 +172,15 @@
     if (db) return 1;
     return 0;
   }
+  // Scholarship amounts are credits to the student, not payments made by the student.
+  const isCredit = (r) => r.category === 'Scholarship';
   function stats() {
     const tasks = allTasks();
     const done = tasks.filter((t) => t.done).length;
     const due = state.records.filter((r) => Number(r.balanceDue) > 0 && parseDay(r.deadline)).sort(sortByDeadline)[0];
     return {
       total: state.records.length,
-      paid: state.records.reduce((s, r) => s + (Number(r.amountPaid) || 0), 0),
+      paid: state.records.reduce((s, r) => s + (isCredit(r) ? 0 : Number(r.amountPaid) || 0), 0),
       balance: state.records.reduce((s, r) => s + (Number(r.balanceDue) || 0), 0),
       nextDue: due ? due.deadline : null,
       tasks: tasks.length, done, pending: tasks.length - done,
@@ -173,6 +191,7 @@
   // ───────── Routing & shell ─────────
   function setView(view, { push = true } = {}) {
     if (!VIEWS.includes(view)) view = 'dashboard';
+    closeDrawer();
     // A finished scan should not greet the student again next time they open Scan
     if (state.view === 'scanner' && view !== 'scanner' && state.scan.saved) resetScan();
     state.view = view;
@@ -192,6 +211,7 @@
     if (animate) { root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter'); }
     updateNavBadge();
     icons();
+    if (state.drawerId) renderDrawer();
     if (state.view === 'buddy') scrollChat();
   }
   function updateNavBadge() {
@@ -211,7 +231,7 @@
 
   function renderStudentSelect() {
     $('#studentSelect').innerHTML = STUDENTS.map((s) =>
-      `<option value="${esc(s.id)}" ${s.id === state.studentId ? 'selected' : ''}>${esc(s.name)} • ${esc(s.id)} (${esc(s.program)})</option>`).join('');
+      `<option value="${esc(s.id)}" ${s.id === state.studentId ? 'selected' : ''}>${esc(s.name)} · ${esc(s.program)}</option>`).join('');
   }
   function renderApiMode() {
     const sw = $('#mockSwitch');
@@ -230,8 +250,8 @@
       return `
         <section class="card next-card" aria-labelledby="nextTitle">
           <p class="eyebrow">Next step</p>
-          <h2 id="nextTitle" class="next-title">Wala ka pang documents. Scan your first receipt or memo.</h2>
-          <p class="next-from">We will read it and list what you need to do.</p>
+          <h2 id="nextTitle" class="next-title">Scan your first document</h2>
+          <p class="next-from">Wala ka pang documents. Mag-upload ng resibo o memo, at ililista namin ang mga dapat mong gawin.</p>
           <div class="next-actions"><button class="btn btn-primary btn-lg" data-action="goto" data-view="scanner" type="button"><i data-lucide="scan-line"></i>Scan a document</button></div>
         </section>`;
     }
@@ -268,8 +288,14 @@
     const s = stats();
     const st = student();
     const recent = state.records.slice(0, 3);
-    const paidDocs = state.records.filter((r) => Number(r.amountPaid) > 0).length;
+    const paidDocs = state.records.filter((r) => !isCredit(r) && Number(r.amountPaid) > 0).length;
     const owing = s.balance > 0;
+
+    if (!state.records.length) {
+      return `
+        <div class="page-head"><div><h1 class="page-title">Magandang araw, ${esc(st.first)}</h1><p class="page-sub">Ito ang kailangan mong gawin ngayon.</p></div></div>
+        ${nextStepHtml()}`;
+    }
 
     return `
       <div class="page-head">
@@ -315,10 +341,10 @@
       </section>`;
   }
 
-  function taskRow(t) {
+  function taskRow(t, large = false) {
     const m = dueMeta(t.deadline);
     return `
-      <label class="task ${t.done ? 'done' : ''}">
+      <label class="task ${t.done ? 'done' : ''} ${large ? 'task-lg' : ''}">
         <input type="checkbox" ${t.done ? 'checked' : ''} data-action="toggle-task" data-rec="${esc(t.recordId)}" data-task="${esc(t.id)}" aria-label="${esc(t.text)}" />
         <span class="task-body">
           <div class="task-text">${esc(t.text)}</div>
@@ -405,7 +431,7 @@
   function scanStep2() {
     const sc = state.scan;
     const left = `
-      <div class="card sticky-card">
+      <div class="card sticky-card scan-preview">
         <div class="card-head"><h2 class="card-title">Your document</h2></div>
         <div class="preview-box">${previewHtml(sc)}</div>
       </div>`;
@@ -769,90 +795,176 @@
   }
   function viewSaved(id) { setView('vault'); openRecord(id); }
 
-  // ───────── View 3: Record Vault ─────────
+  // ───────── View 3: My Documents ─────────
+  // Receipts = money papers. Notes = memos, clearance papers and class notes.
+  const DOC_GROUP = { 'Receipt & Tuition': 'RECEIPTS', 'Scholarship': 'RECEIPTS', 'Enrollment & Clearance': 'NOTES', 'Class Note & Memo': 'NOTES' };
+  const DOC_FILTERS = [['ALL', 'All'], ['RECEIPTS', 'Receipts'], ['NOTES', 'Notes']];
+
   function filteredRecords() {
     const q = state.vaultQ.trim().toLowerCase();
     return state.records.filter((r) => {
-      if (state.vaultCat !== 'ALL' && r.category !== state.vaultCat) return false;
+      if (state.vaultCat !== 'ALL' && DOC_GROUP[r.category] !== state.vaultCat) return false;
       return !q || [r.title, r.referenceNo, r.summary, r.category].some((x) => String(x || '').toLowerCase().includes(q));
     });
   }
-  function recordCard(r) {
+
+  // Status = color + icon + word
+  function docStatus(r) {
+    const tasks = r.tasks || [];
+    const open = tasks.filter((t) => !t.done).length;
+    const owing = Number(r.balanceDue) > 0;
     const m = dueMeta(r.deadline);
-    const open = (r.tasks || []).filter((t) => !t.done).length;
+    if ((owing || open) && m && m.days < 0) return { cls: 'badge-danger', icon: 'alert-circle', label: 'Overdue' };
+    if (owing) return { cls: 'badge-warn', icon: 'clock', label: m && m.days <= 7 ? 'Due soon' : 'Balance due' };
+    if (open) return { cls: 'badge-warn', icon: 'clock', label: `${open} to do` };
+    if (Number(r.amountPaid) > 0) return { cls: 'badge-ok', icon: 'check', label: isCredit(r) ? 'Credited' : 'Paid' };
+    return { cls: 'badge-ok', icon: 'check', label: tasks.length ? 'Done' : 'Saved' };
+  }
+
+  function recordCard(r) {
+    const st = docStatus(r);
+    const paid = Number(r.amountPaid) || 0, due = Number(r.balanceDue) || 0;
+    const amount = paid > 0 ? `${pesoTile(paid)} <small>${isCredit(r) ? 'credited' : 'paid'}</small>` : due > 0 ? `${pesoTile(due)} <small>to pay</small>` : '';
     return `
-      <button class="rec-card" data-action="open-record" data-id="${esc(r.id)}" type="button">
-        <div class="row" style="justify-content:space-between">
-          <span class="badge badge-brand"><i data-lucide="${CATEGORY_ICON[r.category] || 'file-text'}"></i>${esc(r.category)}</span>
-          ${Number(r.balanceDue) > 0 ? '<span class="badge badge-warn"><i data-lucide="clock"></i>Balance due</span>' : '<span class="badge badge-ok"><i data-lucide="badge-check"></i>Verified</span>'}
+      <button class="rec-card doc-card" data-action="open-record" data-id="${esc(r.id)}" type="button">
+        <div class="doc-top">
+          <span class="doc-type"><i data-lucide="${CATEGORY_ICON[r.category] || 'file-text'}"></i>${esc(r.category)}</span>
+          <span class="badge ${st.cls}"><i data-lucide="${st.icon}"></i>${esc(st.label)}</span>
         </div>
-        <div><h3 class="rec-title">${esc(r.title)}</h3><div class="rec-ref">${esc(r.referenceNo)}</div></div>
-        <p class="rec-summary">${esc(r.summary || 'No summary yet.')}</p>
-        <div class="rec-money">
-          <div><div class="money-label">Paid</div><div class="money-val ok">${peso(r.amountPaid)}</div></div>
-          <div><div class="money-label">Balance</div><div class="money-val warn">${peso(r.balanceDue)}</div></div>
-          <div style="margin-left:auto;text-align:right"><div class="money-label">${m ? 'Deadline' : 'Filed'}</div><div class="money-val" style="font-size:12.5px">${m ? esc(fmtDay(r.deadline)) : esc(r.createdAt || '')}</div></div>
-        </div>
-        ${open ? `<div class="card-sub">${open} open task${open > 1 ? 's' : ''}</div>` : ''}
+        <h3 class="rec-title">${esc(r.title)}</h3>
+        <div class="doc-meta"><span>${esc(r.createdAt || '')}</span>${amount ? `<span class="doc-amt">${amount}</span>` : ''}</div>
       </button>`;
   }
+
   function vaultGridHtml() {
+    if (!state.records.length) return emptyState('folder-open', 'No documents yet', 'Scan a receipt or memo and it will show up here.', 'Scan your first document', 'scanner');
     const list = filteredRecords();
-    if (!state.records.length) return emptyState('folder-open', 'No documents yet', 'Scan a receipt or memo and it will show up here.', 'Scan a document', 'scanner');
-    if (!list.length) return `<div class="empty"><i data-lucide="search-x"></i><p class="empty-title">No matches</p><p>Try a different search or category.</p></div>`;
+    if (!list.length) return `<div class="empty"><p class="empty-title">No matches</p><p>Try a different word, or show everything again.</p><button class="btn btn-ghost" data-action="clear-search" type="button">Clear search</button></div>`;
     return `<div class="vault-grid">${list.map(recordCard).join('')}</div>`;
   }
+
   function viewVault() {
-    const chips = ['ALL', ...CATEGORIES].map((c) =>
-      `<button class="chip ${state.vaultCat === c ? 'active' : ''}" data-action="vault-cat" data-cat="${esc(c)}" type="button">${c === 'ALL' ? 'All' : esc(c)}</button>`).join('');
+    const has = state.records.length > 0;
+    const chips = DOC_FILTERS.map(([k, label]) =>
+      `<button class="chip ${state.vaultCat === k ? 'active' : ''}" data-action="vault-cat" data-cat="${k}" aria-pressed="${state.vaultCat === k}" type="button">${label}</button>`).join('');
     return `
       <div class="page-head">
-        <div><h1 class="page-title">My Documents</h1><p class="page-sub">Every receipt, memo and note in one place.</p></div>
-        <div class="row"><button class="btn btn-ghost" data-action="quick-note" type="button"><i data-lucide="square-pen"></i>New note</button><button class="btn btn-primary" data-action="goto" data-view="scanner" type="button"><i data-lucide="scan-line"></i>Scan a document</button></div>
+        <div><h1 class="page-title">My Documents</h1><p class="page-sub">Your receipts, memos and notes in one place.</p></div>
+        <div class="row">
+          <button class="btn ${has ? 'btn-ghost' : 'btn-ghost'}" data-action="quick-note" type="button"><i data-lucide="square-pen"></i>New note</button>
+          ${has ? '<button class="btn btn-primary" data-action="goto" data-view="scanner" type="button"><i data-lucide="scan-line"></i>Scan a document</button>' : ''}
+        </div>
       </div>
-      <div class="toolbar">
-        <div class="search"><i data-lucide="search"></i><label class="sr-only" for="vaultSearch">Search documents</label><input id="vaultSearch" class="input" type="search" placeholder="Search by title, OR number or note" value="${esc(state.vaultQ)}" /></div>
+      ${has ? `<div class="toolbar">
+        <div class="search"><i data-lucide="search"></i><label class="sr-only" for="vaultSearch">Search documents</label><input id="vaultSearch" class="input" type="search" placeholder="Search by title or OR number" value="${esc(state.vaultQ)}" /></div>
         <div class="chips" id="vaultChips">${chips}</div>
-      </div>
+      </div>` : ''}
       <div id="vaultGrid">${vaultGridHtml()}</div>`;
   }
   function refreshVaultGrid() {
     const g = $('#vaultGrid'); if (!g) return;
     g.innerHTML = vaultGridHtml();
-    $$('#vaultChips .chip').forEach((c) => c.classList.toggle('active', c.dataset.cat === state.vaultCat));
+    $$('#vaultChips .chip').forEach((c) => { const on = c.dataset.cat === state.vaultCat; c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on)); });
     icons();
   }
 
+  // ── Right-side drawer ──
+  let drawerOpener = null;
   function openRecord(id) {
-    const r = state.records.find((x) => x.id === id);
-    if (!r) return;
-    const m = dueMeta(r.deadline);
-    openModal(`
-      <div class="modal-head">
-        <div>
-          <span class="badge badge-brand"><i data-lucide="${CATEGORY_ICON[r.category] || 'file-text'}"></i>${esc(r.category)}</span>
-          <h2 class="modal-title" style="margin-top:8px">${esc(r.title)}</h2>
-          <div class="rec-ref">${esc(r.referenceNo)} • Filed ${esc(r.createdAt || '')}</div>
-        </div>
-        <button class="icon-btn" data-action="close-modal" type="button" aria-label="Close"><i data-lucide="x"></i></button>
-      </div>
-      <div class="kv">
-        <div><div class="money-label">Amount paid</div><div class="money-val ok v">${peso(r.amountPaid)}</div></div>
-        <div><div class="money-label">Balance due</div><div class="money-val warn v">${peso(r.balanceDue)}</div></div>
-        <div><div class="money-label">Deadline</div><div class="v">${esc(fmtDay(r.deadline))}</div><div style="margin-top:6px">${dueBadge(m)}</div></div>
-      </div>
-      ${r.summary ? `<h3 class="card-title" style="font-size:16px">What this means</h3><p style="margin:6px 0 14px">${richText(r.summary)}</p>` : ''}
-      ${(r.studyNotes || []).length ? `<h3 class="card-title">Key notes</h3><ul class="note-list">${r.studyNotes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
-      ${(r.tasks || []).length ? `<h3 class="card-title" style="margin-top:14px">Checklist</h3>${r.tasks.map((t) => taskRow({ ...t, recordId: r.id, recordTitle: r.title, deadline: r.deadline })).join('')}` : ''}
-      ${r.rawText ? `<details class="disclose"><summary>View scanned text</summary><div class="disclose-body"><div class="raw">${esc(r.rawText)}</div></div></details>` : ''}
-      <div class="modal-actions">
-        <button class="btn btn-ghost" data-action="confirm-delete" data-id="${esc(r.id)}" type="button" style="color:var(--danger-ink)"><i data-lucide="trash-2"></i>Delete</button>
-        <button class="btn btn-primary" data-action="close-modal" type="button">Done</button>
-      </div>`, true);
+    if (!state.records.find((x) => x.id === id)) return;
+    if (!$('#drawerPanel')) {
+      drawerOpener = document.activeElement;
+      $('#drawerRoot').innerHTML = `<div class="drawer-back" data-action="drawer-backdrop"><aside class="drawer-panel" id="drawerPanel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1"></aside></div>`;
+      document.body.classList.add('no-scroll');
+    }
+    state.drawerId = id;
+    renderDrawer();
+    const close = $('#drawerPanel [data-action="close-drawer"]'); if (close) close.focus();
   }
+  function closeDrawer() {
+    if (!$('#drawerPanel')) { state.drawerId = null; return; }
+    const lastId = state.drawerId;
+    state.drawerId = null;
+    $('#drawerRoot').innerHTML = '';
+    document.body.classList.remove('no-scroll');
+    const back = drawerOpener && document.contains(drawerOpener) ? drawerOpener : $(`[data-action="open-record"][data-id="${lastId}"]`);
+    if (back) back.focus();
+    drawerOpener = null;
+  }
+  function renderDrawer() {
+    const panel = $('#drawerPanel'); if (!panel) return;
+    const r = state.records.find((x) => x.id === state.drawerId);
+    if (!r) { closeDrawer(); return; }
+    const oldBody = $('.drawer-body', panel); const top = oldBody ? oldBody.scrollTop : 0;
+    const st = docStatus(r), m = dueMeta(r.deadline);
+    const tasks = r.tasks || [];
+    panel.innerHTML = `
+      <div class="drawer-head">
+        <div class="drawer-titles">
+          <div class="row"><span class="badge ${st.cls}"><i data-lucide="${st.icon}"></i>${esc(st.label)}</span><span class="doc-type">${esc(r.category)}</span></div>
+          <h2 id="drawerTitle" class="drawer-title">${esc(r.title)}</h2>
+          <div class="drawer-sub"><span class="ref">${esc(r.referenceNo)}</span> · Filed ${esc(r.createdAt || '')}</div>
+        </div>
+        <div class="drawer-tools">
+          <div class="menu-wrap">
+            <button class="icon-btn" data-action="toggle-menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions"><i data-lucide="ellipsis-vertical"></i></button>
+            <div class="menu" role="menu" hidden>
+              <button role="menuitem" class="menu-item" data-action="print-doc" type="button"><i data-lucide="printer"></i>Print</button>
+              <button role="menuitem" class="menu-item" data-action="download-doc" type="button"><i data-lucide="download"></i>Download</button>
+              <hr class="menu-sep" />
+              <button role="menuitem" class="menu-item danger" data-action="confirm-delete" data-id="${esc(r.id)}" type="button"><i data-lucide="trash-2"></i>Delete</button>
+            </div>
+          </div>
+          <button class="icon-btn" data-action="close-drawer" type="button" aria-label="Close"><i data-lucide="x"></i></button>
+        </div>
+      </div>
+      <div class="drawer-body">
+        <dl class="summary-grid three">
+          <div><dt>${isCredit(r) ? 'Amount credited' : 'Amount paid'}</dt><dd>${peso(r.amountPaid)}</dd></div>
+          <div><dt>Balance due</dt><dd>${peso(r.balanceDue)}</dd></div>
+          <div><dt>Deadline</dt><dd>${esc(fmtDay(r.deadline))}</dd>${m ? `<div style="margin-top:6px">${dueBadge(m)}</div>` : ''}</div>
+        </dl>
+        ${r.summary ? `<h3 class="drawer-h">What this means</h3><p class="drawer-p">${richText(r.summary)}</p>` : ''}
+        ${(r.studyNotes || []).length ? `<h3 class="drawer-h">Key notes</h3><ul class="note-list">${r.studyNotes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+        ${tasks.length ? `<h3 class="drawer-h">Checklist</h3>${tasks.map((t) => taskRow({ ...t, recordId: r.id, recordTitle: '', deadline: null })).join('')}` : ''}
+        ${r.rawText ? `<details class="disclose"><summary>View scanned text</summary><div class="disclose-body"><div class="raw">${esc(r.rawText)}</div></div></details>` : ''}
+      </div>`;
+    icons();
+    const nb = $('.drawer-body', panel); if (nb) nb.scrollTop = top;
+  }
+  const closeMenus = () => $$('.menu').forEach((mn) => { if (!mn.hidden) { mn.hidden = true; const b = $('[data-action="toggle-menu"]', mn.parentElement); if (b) b.setAttribute('aria-expanded', 'false'); } });
+
+  function printDoc() {
+    closeMenus();
+    document.body.classList.add('printing');
+    window.addEventListener('afterprint', () => document.body.classList.remove('printing'), { once: true });
+    window.print();
+  }
+  function downloadDoc() {
+    closeMenus();
+    const r = state.records.find((x) => x.id === state.drawerId); if (!r) return;
+    const lines = [
+      r.title, '='.repeat(Math.min(60, r.title.length)), '',
+      `Type: ${r.category}`, `Reference no.: ${r.referenceNo}`, `Filed: ${r.createdAt || ''}`,
+      `Amount paid: ${peso(r.amountPaid)}`, `Balance due: ${peso(r.balanceDue)}`, `Deadline: ${fmtDay(r.deadline)}`, ''
+    ];
+    if (r.summary) lines.push('What this means', r.summary, '');
+    if ((r.studyNotes || []).length) lines.push('Key notes', ...r.studyNotes.map((n) => `- ${n}`), '');
+    if ((r.tasks || []).length) lines.push('Checklist', ...r.tasks.map((t) => `[${t.done ? 'x' : ' '}] ${t.text}`), '');
+    if (r.rawText) lines.push('Scanned text', r.rawText);
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (r.title.replace(/[^\w\- ]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'document') + '.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Downloaded.');
+  }
+
   function confirmDelete(id) {
     const r = state.records.find((x) => x.id === id);
     if (!r) return;
+    closeMenus();
     openModal(`
       <h2 class="modal-title">Delete this document?</h2>
       <p class="card-sub" style="margin-top:8px"><strong>${esc(r.title)}</strong> and its checklist will be removed from My Documents. This cannot be undone.</p>
@@ -862,110 +974,283 @@
       </div>`);
   }
 
-  // ───────── View 4: Clearance Tracker ─────────
+  // ───────── View 4: Clearance & Payments (two tabs) ─────────
+  const OFFICES = ['Cashier', 'Library', 'Registrar'];
+  const OFFICE_ICON = { Cashier: 'wallet', Library: 'library', Registrar: 'file-check' };
+  function officeOf(t) {
+    if (OFFICES.includes(t.office)) return t.office;
+    const s = String(t.text || '');
+    if (/library|computer lab|\blab\b/i.test(s)) return 'Library';
+    if (/cashier|bayad|bayaran|\bpay\b|payment|balance|₱|tuition|\bfee/i.test(s)) return 'Cashier';
+    return 'Registrar';
+  }
+
   function viewTracker() {
-    const s = stats();
-    const showAll = state.trackerShow === 'all';
-    const groups = state.records
-      .map((r) => ({ r, tasks: (r.tasks || []).filter((t) => showAll || !t.done) }))
-      .filter((g) => g.tasks.length)
-      .sort((a, b) => sortByDeadline(a.r, b.r));
+    const tab = state.cpTab;
+    const tabs = [['payments', 'Payments'], ['clearance', 'Clearance']].map(([k, label]) =>
+      `<button role="tab" id="tab-${k}" class="tab" aria-selected="${tab === k}" aria-controls="panel-${k}" tabindex="${tab === k ? 0 : -1}" data-action="cp-tab" data-tab="${k}" type="button">${label}</button>`).join('');
     return `
-      <div class="page-head">
-        <div><h1 class="page-title">Clearance &amp; Payments</h1><p class="page-sub">What to submit and what to pay, earliest deadline first.</p></div>
-        <div class="chips">
-          <button class="chip ${!showAll ? 'active' : ''}" data-action="tracker-show" data-show="pending" type="button">Pending (${s.pending})</button>
-          <button class="chip ${showAll ? 'active' : ''}" data-action="tracker-show" data-show="all" type="button">All (${s.tasks})</button>
+      <div class="page-head"><div><h1 class="page-title">Clearance &amp; Payments</h1><p class="page-sub">What you paid, what you still owe, and what to submit.</p></div></div>
+      <div class="tabs" role="tablist" aria-label="Clearance and payments">${tabs}</div>
+      <div role="tabpanel" id="panel-${tab}" aria-labelledby="tab-${tab}" tabindex="0">${tab === 'payments' ? paymentsPanel() : clearancePanel()}</div>`;
+  }
+
+  // Payments: one row per payment made, one row per balance still owed
+  function paymentRows() {
+    const rows = [];
+    state.records.forEach((r) => {
+      const paid = Number(r.amountPaid) || 0, due = Number(r.balanceDue) || 0;
+      if (paid > 0) rows.push({ kind: isCredit(r) ? 'credit' : 'paid', ts: Date.parse(r.createdAt) || 0, date: r.createdAt || '—', amount: paid, rec: r });
+      if (due > 0) {
+        const d = parseDay(r.deadline);
+        rows.push({ kind: 'due', ts: d ? d.getTime() : 0, date: d ? fmtDay(r.deadline) : 'No date yet', amount: due, rec: r, meta: dueMeta(r.deadline) });
+      }
+    });
+    return rows.sort((a, b) => b.ts - a.ts);
+  }
+  function paymentStatus(row) {
+    if (row.kind === 'paid') return '<span class="badge badge-ok"><i data-lucide="check"></i>Paid</span>';
+    if (row.kind === 'credit') return '<span class="badge badge-ok"><i data-lucide="check"></i>Credited</span>';
+    const d = row.meta ? row.meta.days : null;
+    if (d !== null && d < 0) return '<span class="badge badge-danger"><i data-lucide="alert-circle"></i>Overdue</span>';
+    if (d !== null && d <= 7) return '<span class="badge badge-warn"><i data-lucide="clock"></i>Due soon</span>';
+    return '<span class="badge badge-warn"><i data-lucide="clock"></i>To pay</span>';
+  }
+  function paymentsPanel() {
+    const rows = paymentRows();
+    if (!rows.length) return emptyState('wallet', 'No payments yet', 'Scan a receipt and your payments will be listed here.', 'Scan your first document', 'scanner');
+    const s = stats();
+    const body = rows.map((row) => `
+      <tr>
+        <td class="c-date" data-label="Date">${esc(row.date)}</td>
+        <td class="c-desc"><button class="link-btn plain" data-action="open-record" data-id="${esc(row.rec.id)}" type="button">${esc(row.kind === 'due' ? 'Balance for ' + row.rec.title : row.kind === 'credit' ? 'Scholarship credit: ' + row.rec.title : row.rec.title)}</button><div class="ref">${esc(row.rec.referenceNo)}</div></td>
+        <td class="c-amt num">${peso(row.amount)}</td>
+        <td class="c-status">${paymentStatus(row)}</td>
+      </tr>`).join('');
+    const note = s.balance > 0
+      ? `<div class="banner warn" role="status"><i data-lucide="clock"></i><div><strong>You still need to pay ${peso(s.balance)}.</strong><div>${s.nextDue ? `Please pay at the Cashier by ${esc(fmtDay(s.nextDue))}. ${dueBadge(dueMeta(s.nextDue))}` : 'Please pay at the Cashier.'}</div></div></div>`
+      : `<div class="banner ok" role="status"><i data-lucide="check-circle-2"></i><div><strong>No balance left to pay.</strong><div>Salamat! You are fully paid for the papers you scanned.</div></div></div>`;
+    return `
+      <div class="card table-card">
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="sr-only">Payments made and balances still to pay</caption>
+            <thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col" class="num">Amount</th><th scope="col">Status</th></tr></thead>
+            <tbody>${body}</tbody>
+            <tfoot><tr><th scope="row" colspan="2">Total paid so far</th><td class="num">${peso(s.paid)}</td><td></td></tr></tfoot>
+          </table>
         </div>
       </div>
-      <div class="card" style="margin-bottom:20px">
-        <div class="row" style="justify-content:space-between;margin-bottom:10px"><strong>${s.done} of ${s.tasks} done</strong><span class="mono" style="color:var(--muted)">${s.pct}%</span></div>
-        <div class="progress ${s.pct === 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${s.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Overall clearance progress"><span style="width:${s.pct}%"></span></div>
+      <div style="margin-top:24px">${note}</div>
+      ${rows.some((x) => x.kind === 'credit') ? '<p class="card-sub" style="margin-top:16px">Scholarship credits are listed for reference. They are not counted in your total paid.</p>' : ''}`;
+  }
+
+  function clearancePanel() {
+    const s = stats();
+    if (!s.tasks) return emptyState('list-checks', 'No requirements yet', 'Scan a clearance memo and your to-do list builds itself.', 'Scan your first document', 'scanner');
+    const left = s.tasks - s.done;
+    const headline = left === 0 ? `All ${s.tasks} done. Nice work!` : `${s.done} of ${s.tasks} done, ${left} to go`;
+    const all = allTasks().map((t) => ({ ...t, office: officeOf(t) }));
+    const groups = OFFICES.map((o) => ({
+      office: o,
+      tasks: all.filter((t) => t.office === o).sort((a, b) => (a.done - b.done) || sortByDeadline(a, b))
+    })).filter((g) => g.tasks.length);
+    return `
+      <div class="card" style="margin-bottom:24px">
+        <p class="clear-headline">${headline}</p>
+        <div class="progress ${s.pct === 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${s.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Clearance progress"><span style="width:${s.pct}%"></span></div>
       </div>
-      ${groups.length ? `<div class="stack">${groups.map(({ r, tasks }) => {
-        const m = dueMeta(r.deadline);
-        return `<div class="card">
+      <div class="stack">${groups.map((g) => {
+        const d = g.tasks.filter((t) => t.done).length;
+        return `<section class="card" aria-labelledby="off-${g.office}">
           <div class="group-head">
-            <div><h2 class="group-title">${esc(r.title)}</h2><span class="rec-ref">${esc(r.referenceNo)}</span></div>
-            ${m ? `<span class="badge ${m.cls}"><i data-lucide="${m.icon}"></i>${esc(fmtDay(r.deadline))} · ${esc(m.label)}</span>` : ''}
+            <h2 id="off-${g.office}" class="card-title office-title"><i data-lucide="${OFFICE_ICON[g.office]}"></i>${g.office}</h2>
+            <span class="card-sub">${d} of ${g.tasks.length} done</span>
           </div>
-          ${tasks.map((t) => taskRow({ ...t, recordId: r.id, recordTitle: r.title, deadline: null })).join('')}
-        </div>`;
-      }).join('')}</div>` : (s.tasks ? `<div class="empty"><i data-lucide="party-popper"></i><p class="empty-title">All requirements done</p><p>Nice work. Switch to "All" to review them.</p></div>`
-        : emptyState('list-checks', 'No requirements yet', 'Scan a clearance memo and your to-do list builds itself.', 'Scan a document', 'scanner'))}`;
+          ${g.tasks.map((t) => taskRow(t, true)).join('')}
+        </section>`;
+      }).join('')}</div>`;
   }
 
   // ───────── View 5: Ask EasyBo ─────────
-  const PROMPTS = [
-    ['wallet', 'Magkano na lahat ng nabayaran ko at magkano pa ang kulang ko?'],
-    ['list-checks', 'Ano ang mga kailangan kong ipasa bago ang deadline?'],
-    ['languages', 'Ipaliwanag sa simpleng Taglish ang pinakabago kong dokumento.']
+  const SUGGESTIONS = [
+    ['wallet', 'Magkano pa ang babayaran ko?'],
+    ['calendar-clock', 'Ano ang deadline ko?'],
+    ['list-checks', 'Ano pa kulang sa clearance ko?'],
+    ['receipt', 'I-summarize ang latest receipt ko']
   ];
-  function botGreeting() {
-    return { role: 'bot', text: `Kumusta, ${student().first}! Ako si **EasyBo**, ang iyong record buddy. Tanungin mo ako tungkol sa mga resibo, balance, at requirements mo.` };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let chatSeq = 0;
+  const addMsg = (m) => { state.chat.push({ id: ++chatSeq, ...m }); };
+
+  // ── Local answers: balance, deadlines, clearance, latest receipt. No network, no credits. ──
+  // Order matters: more specific topics are checked first.
+  const INTENTS = [
+    ['summary', /summar|buod|latest|pinakabago|pinaka-?bago|huling (resibo|receipt)|last receipt/i],
+    ['clearance', /clearance|requirement|ipasa|isumite|i-?submit|\bsubmit\b|permit|kulang sa|to-?do|checklist|\bano pa\b/i],
+    ['deadline', /deadline|due date|\bkailan\b|petsa|hanggang kailan|until when|\bwhen\b/i],
+    ['balance', /balance|babayaran|bayaran|utang|\bowe\b|how much.*(pay|left|remaining)|magkano pa|natitira|remaining/i],
+    ['paid', /nabayaran|bayad na|paid so far|total paid|how much.*paid/i]
+  ];
+  const bullets = (arr) => arr.map((x) => '• ' + x).join('\n');
+  const srcOf = (rs) => rs.map((r) => ({ id: r.id, title: r.title }));
+  const needScan = (text) => ({ text, sources: [], action: { label: 'Scan a document', view: 'scanner' } });
+  const daysTaglish = (m) => (!m ? '' : m.days < 0 ? `${-m.days} araw nang lampas` : m.days === 0 ? 'ngayon ang deadline' : `${m.days} araw na lang`);
+
+  function localAnswer(q) {
+    const kind = (INTENTS.find(([, re]) => re.test(q)) || [])[0];
+    if (!kind) return null; // open-ended: let the AI handle it
+    const recs = state.records;
+    if (!recs.length) return needScan('Wala pa akong nakikitang documents mo. Mag-scan ka muna ng resibo o memo, tapos masasagot ko na iyan.');
+    const s = stats();
+
+    if (kind === 'balance') {
+      const owing = recs.filter((r) => Number(r.balanceDue) > 0).sort(sortByDeadline);
+      const paidLine = s.paid > 0 ? `\n\nNabayaran mo na ang **${peso(s.paid)}** sa ngayon.` : '';
+      if (!owing.length) return { text: `Wala kang balance na babayaran. Salamat!${paidLine}`, sources: srcOf(recs.filter((r) => !isCredit(r) && Number(r.amountPaid) > 0)) };
+      const total = owing.reduce((sum, r) => sum + Number(r.balanceDue), 0);
+      const lines = owing.map((r) => { const m = dueMeta(r.deadline); return `${peso(r.balanceDue)} para sa ${r.title}${m ? `, bago mag ${fmtDay(r.deadline)} (${daysTaglish(m)})` : ''}`; });
+      return { text: `May **${peso(total)}** ka pang babayaran.\n${bullets(lines)}${paidLine}`, sources: srcOf(owing) };
+    }
+    if (kind === 'paid') {
+      const paidRecs = recs.filter((r) => !isCredit(r) && Number(r.amountPaid) > 0);
+      if (!paidRecs.length) return { text: 'Wala pa akong nakikitang bayad sa mga documents mo.', sources: [] };
+      return { text: `Nabayaran mo na ang **${peso(s.paid)}** sa kabuuan.\n${bullets(paidRecs.map((r) => `${peso(r.amountPaid)}: ${r.title}`))}`, sources: srcOf(paidRecs) };
+    }
+    if (kind === 'deadline') {
+      const pending = recs.filter((r) => parseDay(r.deadline) && (Number(r.balanceDue) > 0 || (r.tasks || []).some((t) => !t.done))).sort(sortByDeadline);
+      if (!pending.length) return { text: recs.some((r) => parseDay(r.deadline)) ? 'Wala kang pending na deadline. Tapos mo na ang lahat!' : 'Wala akong nakikitang deadline sa mga documents mo.', sources: [] };
+      const first = pending[0];
+      const rest = pending.length > 1 ? `\n\nLahat ng deadline mo:\n${bullets(pending.map((r) => `${fmtDay(r.deadline)}: ${r.title} (${daysTaglish(dueMeta(r.deadline))})`))}` : '';
+      return { text: `Ang pinakamalapit mong deadline ay **${fmtDay(first.deadline)}** (${daysTaglish(dueMeta(first.deadline))}) para sa ${first.title}.${rest}`, sources: srcOf(pending) };
+    }
+    if (kind === 'clearance') {
+      if (!s.tasks) return needScan('Wala pa akong nakikitang requirements. Mag-scan ng clearance memo para ma-list ko ang mga kailangan mo.');
+      const pend = allTasks().filter((t) => !t.done);
+      if (!pend.length) return { text: `Kumpleto na ang clearance mo: **${s.done} of ${s.tasks}** done. Magaling!`, sources: srcOf(recs.filter((r) => (r.tasks || []).length)) };
+      const byOffice = OFFICES.map((o) => ({ o, items: pend.filter((t) => officeOf(t) === o) })).filter((g) => g.items.length);
+      const ids = new Set(pend.map((t) => t.recordId));
+      return {
+        text: `Natapos mo na ang **${s.done} of ${s.tasks}**. May **${pend.length}** pang kulang:\n\n` + byOffice.map((g) => `**${g.o}**\n${bullets(g.items.map((t) => t.text))}`).join('\n\n'),
+        sources: srcOf(recs.filter((r) => ids.has(r.id)))
+      };
+    }
+    // summary: newest receipt
+    const r = recs.find((x) => x.category === 'Receipt & Tuition') || recs.find((x) => !isCredit(x) && Number(x.amountPaid) > 0);
+    if (!r) return needScan('Wala pa akong resibong makikita. Mag-scan ng resibo para ma-summarize ko.');
+    const m = dueMeta(r.deadline);
+    const lines = [
+      `Reference no.: ${r.referenceNo}`,
+      `Binayaran: ${peso(r.amountPaid)}`,
+      Number(r.balanceDue) > 0 ? `Natitirang balance: ${peso(r.balanceDue)}${m ? `, bago mag ${fmtDay(r.deadline)}` : ''}` : 'Walang natitirang balance',
+      `Na-file noong ${r.createdAt || 'hindi tiyak ang petsa'}`
+    ];
+    return { text: `Ito ang pinakabago mong resibo: **${r.title}**.\n${bullets(lines)}${r.summary ? `\n\n${r.summary}` : ''}`, sources: srcOf([r]) };
+  }
+
+  // ── AI answers (open-ended questions only) ──
+  function buildContext() {
+    if (!state.records.length) return '';
+    return 'SAVED DOCUMENTS (newest first):\n' + state.records.map((r) => {
+      const open = (r.tasks || []).filter((t) => !t.done).map((t) => t.text).join('; ');
+      return `- [${r.category}] ${r.title} (Ref: ${r.referenceNo}, Paid: PHP ${r.amountPaid}, Balance Due: PHP ${r.balanceDue}, Deadline: ${r.deadline}${open ? `, To do: ${open}` : ''}): ${String(r.summary || '').slice(0, 140)}`;
+    }).join('\n');
+  }
+  // Which saved documents does the answer actually mention?
+  function aiSources(text) {
+    const t = text.toLowerCase();
+    return srcOf(state.records.filter((r) =>
+      (r.title && t.includes(r.title.toLowerCase())) ||
+      (r.referenceNo && !/^(n\/a|note)$/i.test(r.referenceNo) && t.includes(r.referenceNo.toLowerCase()))).slice(0, 6));
+  }
+  const friendlyError = (msg) => (/failed to fetch|networkerror|load failed/i.test(msg || '') ? 'I cannot reach the server. Please check your internet connection.' : String(msg || 'Something went wrong.'));
+
+  async function ask(question, retry = false) {
+    question = (question || '').trim().slice(0, 500);
+    if (!question || state.chatBusy) return;
+    if (!retry) addMsg({ role: 'user', text: question });
+    state.chatBusy = true; refreshChat();
+    try {
+      const local = localAnswer(question);
+      if (local) {
+        await wait(550); // a short beat so it feels like a conversation
+        addMsg({ role: 'bot', ...local });
+      } else {
+        const data = await postJson('/api/chat/ask', { question, contextText: buildContext() });
+        const text = String(data.answer || '').trim() || 'Walang sagot na natanggap. Subukan mong itanong sa ibang paraan.';
+        addMsg({ role: 'bot', text, sources: aiSources(text), ai: true, mock: !!data.mock });
+      }
+    } catch (e) {
+      addMsg({ role: 'bot', kind: 'error', q: question, detail: friendlyError(e.message) });
+    } finally {
+      state.chatBusy = false; refreshChat();
+      const i = $('#chatInput'); if (i && matchMedia('(pointer: fine)').matches) i.focus();
+    }
+  }
+  function retryAsk(id) {
+    const idx = state.chat.findIndex((m) => m.id === id);
+    if (idx < 0) return;
+    const q = state.chat[idx].q;
+    state.chat.splice(idx, 1);
+    ask(q, true);
+  }
+
+  // ── Rendering ──
+  function suggestionsHtml(compact) {
+    return SUGGESTIONS.map(([ic, q]) => compact
+      ? `<button class="chip" type="button" data-action="ask-preset" data-q="${esc(q)}">${esc(q)}</button>`
+      : `<button class="prompt-btn" type="button" data-action="ask-preset" data-q="${esc(q)}"><i data-lucide="${ic}"></i><span>${esc(q)}</span></button>`).join('');
+  }
+  const avatar = '<span class="avatar" aria-hidden="true">EB</span>';
+  function sourceHtml(m) {
+    if (m.sources && m.sources.length) {
+      const links = m.sources.slice(0, 3).map((s) => `<button class="link-btn plain src-link" data-action="open-record" data-id="${esc(s.id)}" type="button">${esc(s.title)}</button>`).join(', ');
+      const more = m.sources.length > 3 ? ` and ${m.sources.length - 3} more` : '';
+      return `<div class="msg-source"><i data-lucide="file-text"></i><span>From: ${links}${more}</span></div>`;
+    }
+    if (m.ai) return `<div class="msg-source"><i data-lucide="sparkles"></i><span>From: Lumen AI, using your saved documents${m.mock ? ' (sample answer)' : ''}</span></div>`;
+    return '';
   }
   function msgHtml(m) {
-    const cites = Array.isArray(m.citations) && m.citations.length ? `<div class="cites">Sources: ${m.citations.map((c) => esc(typeof c === 'string' ? c : (c.title || c.source || c.id || 'source'))).join(', ')}</div>` : '';
-    return `<div class="msg ${m.role}">${richText(m.text)}${cites}</div>`;
+    if (m.role === 'user') return `<div class="msg-row user"><div class="msg user">${richText(m.text)}</div></div>`;
+    if (m.kind === 'error') {
+      return `<div class="msg-row bot">${avatar}<div class="msg-col"><div class="msg bot error" role="alert">
+        <div class="err-title"><i data-lucide="alert-circle"></i>Hindi ko nasagot iyon ngayon.</div>
+        <div>${esc(m.detail)}</div>
+        <button class="btn btn-ghost btn-sm" data-action="retry-ask" data-id="${m.id}" type="button" style="margin-top:12px"><i data-lucide="refresh-cw"></i>Try again</button>
+      </div></div></div>`;
+    }
+    const action = m.action ? `<div><button class="btn btn-ghost btn-sm" data-action="goto" data-view="${esc(m.action.view)}" type="button" style="margin-top:8px"><i data-lucide="scan-line"></i>${esc(m.action.label)}</button></div>` : '';
+    return `<div class="msg-row bot">${avatar}<div class="msg-col"><div class="msg bot">${richText(m.text)}</div>${sourceHtml(m)}${action}</div></div>`;
   }
   function chatLogHtml() {
-    const msgs = state.chat.length ? state.chat : [botGreeting()];
-    const typing = state.chatBusy ? `<div class="msg bot" aria-label="EasyBo is typing"><div class="skel-stack" style="width:180px"><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div></div>` : '';
-    return msgs.map(msgHtml).join('') + typing;
+    const intro = `<div class="msg-row bot">${avatar}<div class="msg-col"><div class="msg bot">Kumusta, ${esc(student().first)}! Ako si <strong>EasyBo</strong>. Tanungin mo ako tungkol sa balance, deadline, at clearance mo.${state.chat.length ? '' : '<br><br>Pumili ng tanong sa ibaba, o i-type ang sarili mo.'}</div></div></div>`;
+    const list = state.chat.length ? state.chat.map(msgHtml).join('') : `<div class="suggest-list">${suggestionsHtml(false)}</div>`;
+    const typing = state.chatBusy ? `<div class="msg-row bot">${avatar}<div class="msg bot typing" role="status" aria-label="EasyBo is typing"><span></span><span></span><span></span></div></div>` : '';
+    return intro + list + typing;
   }
   function viewBuddy() {
     return `
-      <div class="page-head"><div><h1 class="page-title">Ask EasyBo</h1><p class="page-sub">Taglish or English. Answers use your own documents.</p></div></div>
-      <div class="chat-layout">
+      <div class="page-head chat-head"><div><h1 class="page-title">Ask EasyBo</h1><p class="page-sub">Taglish or English. Answers come from your own documents.</p></div></div>
+      <div class="chat-wrap">
         <div class="card chat-card">
-          <div class="chat-log" id="chatLog" tabindex="0" aria-label="Conversation">${chatLogHtml()}</div>
+          <div class="chat-log" id="chatLog" role="log" aria-live="polite" aria-label="Conversation" tabindex="0">${chatLogHtml()}</div>
+          <div class="suggest-row" id="suggestRow" ${state.chat.length ? '' : 'hidden'}>${suggestionsHtml(true)}</div>
           <form class="chat-input" id="chatForm">
             <label class="sr-only" for="chatInput">Your question</label>
-            <input id="chatInput" class="input" autocomplete="off" placeholder="Hal. Ano ang OR number ng lab fee ko?" />
-            <button class="btn btn-primary" type="submit" ${state.chatBusy ? 'disabled' : ''}><i data-lucide="send-horizontal"></i><span class="hide-sm">Send</span></button>
+            <input id="chatInput" class="input" autocomplete="off" maxlength="500" placeholder="Magtanong kay EasyBo…" />
+            <button class="btn btn-primary" type="submit" aria-label="Send" ${state.chatBusy ? 'disabled' : ''}><i data-lucide="send-horizontal"></i><span>Send</span></button>
           </form>
-        </div>
-        <div class="stack">
-          <div class="card">
-            <h2 class="card-title" style="margin-bottom:10px">Ask about</h2>
-            <div class="stack" style="gap:8px">
-              <label class="radio-card"><input type="radio" name="scope" value="vault" ${state.chatScope === 'vault' ? 'checked' : ''} data-action="chat-scope" /><span><strong>All my documents</strong><div class="card-sub">${state.records.length} record${state.records.length === 1 ? '' : 's'} for ${esc(student().first)}</div></span></label>
-              <label class="radio-card"><input type="radio" name="scope" value="doc" ${state.chatScope === 'doc' ? 'checked' : ''} data-action="chat-scope" /><span><strong>The paper I am scanning</strong><div class="card-sub">${state.scan.text.trim() ? 'Uses the paper on the Scan page' : 'No active scan'}</div></span></label>
-            </div>
-          </div>
-          <div class="card">
-            <h2 class="card-title" style="margin-bottom:10px">Try asking</h2>
-            <div class="stack" style="gap:8px">${PROMPTS.map(([ic, q]) => `<button class="prompt-btn" type="button" data-action="ask-preset" data-q="${esc(q)}"><i data-lucide="${ic}"></i><span>${esc(q)}</span></button>`).join('')}</div>
-          </div>
         </div>
       </div>`;
   }
   function scrollChat() { const l = $('#chatLog'); if (l) l.scrollTop = l.scrollHeight; }
   function refreshChat() {
     const l = $('#chatLog'); if (!l) return;
-    l.innerHTML = chatLogHtml(); scrollChat();
+    l.innerHTML = chatLogHtml();
+    const row = $('#suggestRow'); if (row) row.hidden = state.chat.length === 0;
     const btn = $('#chatForm button[type=submit]'); if (btn) btn.disabled = state.chatBusy;
-  }
-  function buildContext() {
-    if (state.chatScope === 'doc') return state.scan.text.trim() ? `CURRENT DOCUMENT:\n${state.scan.text.trim()}` : '';
-    if (!state.records.length) return '';
-    return 'SAVED VAULT RECORDS:\n' + state.records.map((r) =>
-      `- [${r.category}] ${r.title} (Ref: ${r.referenceNo}, Paid: PHP ${r.amountPaid}, Balance Due: PHP ${r.balanceDue}, Deadline: ${r.deadline}): ${r.summary || ''}`).join('\n');
-  }
-  async function ask(question) {
-    question = (question || '').trim();
-    if (!question || state.chatBusy) return;
-    state.chat.push({ role: 'user', text: question });
-    state.chatBusy = true; refreshChat();
-    try {
-      const data = await postJson('/api/chat/ask', { question, contextText: buildContext() });
-      state.chat.push({ role: 'bot', text: data.answer || 'Walang sagot na natanggap.', citations: data.citations });
-    } catch (e) {
-      state.chat.push({ role: 'bot', text: `Sorry, hindi ako nakasagot: ${e.message}` });
-      toast(e.message, 'error');
-    } finally {
-      state.chatBusy = false; refreshChat();
-    }
+    icons(); scrollChat();
   }
 
   // ───────── Demo data & quick note ─────────
@@ -1014,6 +1299,7 @@
 
   // ───────── Event wiring ─────────
   document.addEventListener('click', async (e) => {
+    if (!e.target.closest('.menu-wrap')) closeMenus();
     const el = e.target.closest('[data-action]');
     if (!el) {
       if (!e.target.closest('.popover-wrap')) closeDemo();
@@ -1042,18 +1328,25 @@
         e.stopPropagation();
         const rec = state.records.find((r) => r.id === el.dataset.rec);
         const t = rec?.tasks.find((x) => x.id === el.dataset.task);
-        if (t) { t.done = el.checked; await syncRecords(); renderView(); if ($('#modalRoot .modal')) openRecord(rec.id); }
+        if (t && el.checked && isPaymentTask(t, rec)) { el.checked = false; markTask(rec.id, t.id, true); }
+        else if (t) { t.done = el.checked; await syncRecords(); renderView(); }
         break;
       }
       case 'open-record': openRecord(el.dataset.id); break;
       case 'confirm-delete': confirmDelete(el.dataset.id); break;
       case 'delete-record':
         state.records = state.records.filter((r) => r.id !== el.dataset.id);
-        closeModal(); await syncRecords(); toast('Record deleted.'); renderView(); break;
+        closeModal(); closeDrawer(); await syncRecords(); toast('Document deleted.'); renderView(); break;
       case 'close-modal': closeModal(); break;
       case 'modal-backdrop': if (e.target === el) closeModal(); break;
+      case 'clear-search': state.vaultQ = ''; state.vaultCat = 'ALL'; renderView(); break;
       case 'vault-cat': state.vaultCat = el.dataset.cat; refreshVaultGrid(); break;
-      case 'tracker-show': state.trackerShow = el.dataset.show; renderView(); break;
+      case 'drawer-backdrop': if (e.target === el) closeDrawer(); break;
+      case 'close-drawer': closeDrawer(); break;
+      case 'toggle-menu': { const mn = $('.menu', el.parentElement); const open = mn.hidden; closeMenus(); mn.hidden = !open; el.setAttribute('aria-expanded', String(open)); break; }
+      case 'print-doc': printDoc(); break;
+      case 'download-doc': downloadDoc(); break;
+      case 'cp-tab': state.cpTab = el.dataset.tab; renderView(); $('#tab-' + state.cpTab)?.focus(); break;
       // scanner
       case 'skip-upload': { resetScan(); const sc = state.scan; sc.step = 2; applyStructured({}, ''); renderView(); break; }
       case 'scan-reset': resetScan(); renderView(); window.scrollTo({ top: 0 }); break;
@@ -1068,7 +1361,7 @@
       case 'scan-another': resetScan(); renderView(); window.scrollTo({ top: 0 }); break;
       case 'view-saved': viewSaved(state.scan.savedId); break;      // chat
       case 'ask-preset': ask(el.dataset.q); break;
-      case 'chat-scope': state.chatScope = el.value; break;
+      case 'retry-ask': retryAsk(Number(el.dataset.id)); break;
       default: break;
     }
   });
@@ -1089,7 +1382,7 @@
       e.preventDefault(); saveWord();
     } else if (e.target.id === 'chatForm') {
       e.preventDefault();
-      const i = $('#chatInput'); const q = i.value; i.value = ''; ask(q);
+      const i = $('#chatInput'); const q = i.value; if (state.chatBusy || !q.trim()) return; i.value = ''; ask(q);
     } else if (e.target.id === 'noteForm') {
       e.preventDefault();
       const title = $('#noteTitle').value.trim(), body = $('#noteBody').value.trim();
@@ -1115,7 +1408,24 @@
     else if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); // stop browser opening dropped files
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeModal(); closeDemo(); }
+    if (e.key === 'Escape') {
+      if ($('#modalRoot .modal')) closeModal();
+      else if ($$('.menu').some((mn) => !mn.hidden)) closeMenus();
+      else if ($('#drawerPanel')) closeDrawer();
+      else closeDemo();
+    }
+    if (e.key === 'Tab' && $('#drawerPanel') && !$('#modalRoot .modal')) {
+      const f = $$('#drawerPanel button:not([disabled]), #drawerPanel input, #drawerPanel summary, #drawerPanel [href]').filter((x) => x.offsetParent !== null);
+      if (f.length) {
+        const first = f[0], last = f[f.length - 1];
+        if (!$('#drawerPanel').contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    }
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.target.getAttribute && e.target.getAttribute('role') === 'tab') {
+      state.cpTab = state.cpTab === 'payments' ? 'clearance' : 'payments'; renderView(); $('#tab-' + state.cpTab)?.focus();
+    }
   });
   function closeDemo() { const p = $('#demoPop'); if (p && !p.hidden) { p.hidden = true; $('#demoBtn').setAttribute('aria-expanded', 'false'); } }
 
@@ -1139,7 +1449,8 @@
   $('#studentSelect').addEventListener('change', async (e) => {
     state.studentId = e.target.value;
     localStorage.setItem('easybo.student', state.studentId);
-    state.chat = []; resetScan();
+    state.chat = []; resetScan(); closeDrawer();
+    $('#viewRoot').innerHTML = `<div class="skel-stack" aria-busy="true"><div class="skeleton" style="height:28px;width:40%"></div><div class="skeleton" style="height:140px"></div><div class="skeleton" style="height:90px"></div></div>`;
     await loadRecords();
     toast(`Switched to ${student().name}.`);
     renderView(true);
