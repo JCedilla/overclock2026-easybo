@@ -28,7 +28,7 @@ Headings: Fraunces 600 (warm, academic). Body and UI: Plus Jakarta Sans. JetBrai
 3. Logo: a receipt with a torn bottom edge containing a checkmark; navy receipt, marigold check. Wordmark "EasyBo" in Fraunces, "Student Buddy" small beneath. Provide as inline SVG, a favicon, and public/brand/logo.svg.
 4. Scan step shows a subtle receipt "printing" animation. Respect prefers-reduced-motion.
 5. Empty states: a simple line SVG (receipt or folder) with one Taglish sentence and one button.
-6. Welcome screen: logo, tagline, "Continue as Juan" / "Continue as Maria" (demo profiles, no password), PLP + SDG 4 & 10 badge in the footer.
+6. Welcome screen: logo, tagline, "Continue as Juan" / "Continue as Maria" (demo profiles, no password). No school, partner, or SDG badges.
 
 ## Don'ts
 No gradients, glassmorphism, emoji as icons, heavy shadows, or more than one accent color. Contrast and readability rules in ux-principles.md always win over decoration.

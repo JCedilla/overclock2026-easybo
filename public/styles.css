@@ -28,7 +28,7 @@
   --logo-body: #17305A;
   --logo-line: #FBF7EF;
   /* Receipt zigzag edge (colors must be inlined in a data URI: card fill, line stroke) */
-  --zigzag: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='10' viewBox='0 0 14 10'%3E%3Cpath d='M0 0L7 9L14 0Z' fill='%23FFFFFF'/%3E%3Cpath d='M0 .5L7 9.5L14 .5' fill='none' stroke='%23E7DFCF'/%3E%3C/svg%3E");
+  --zigzag: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='11' viewBox='0 0 16 11'%3E%3Cpath d='M0 0L8 10L16 0Z' fill='%23FFFFFF'/%3E%3Cpath d='M0 .6L8 10.4L16 .6' fill='none' stroke='%23CFC3AB' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   /* Older rule names, mapped onto the tokens */
   --bg: var(--paper);
@@ -74,7 +74,7 @@
   --overdue-soft: #3E2026;
   --logo-body: #FBF7EF;
   --logo-line: #1B2A41;
-  --zigzag: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='10' viewBox='0 0 14 10'%3E%3Cpath d='M0 0L7 9L14 0Z' fill='%231B2A41'/%3E%3Cpath d='M0 .5L7 9.5L14 .5' fill='none' stroke='%232F4260'/%3E%3C/svg%3E");
+  --zigzag: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='11' viewBox='0 0 16 11'%3E%3Cpath d='M0 0L8 10L16 0Z' fill='%231B2A41'/%3E%3Cpath d='M0 .6L8 10.4L16 .6' fill='none' stroke='%233E557A' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.40);
@@ -953,8 +953,6 @@ html.welcoming .app, html.welcoming .tabbar, html.welcoming #drawerRoot { displa
 .profile-btn small { display: block; font-size: 14px; color: var(--ink-soft); }
 .profile-btn .avatar { width: 44px; height: 44px; font-size: 18px; font-family: var(--serif); font-weight: 600; }
 .welcome-note { margin: 18px 0 0; font-size: 14px; color: var(--ink-soft); }
-.welcome-foot { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 14px; width: min(720px, 100%); padding-top: 20px; border-top: 1px dashed var(--line-strong); color: var(--ink-soft); font-size: 14px; text-align: center; }
-.plp-badge, .sdg-chip { display: inline-flex; align-items: center; padding: 2px 10px; border: 1.5px solid var(--ink); border-radius: 6px; color: var(--ink); font-weight: 800; font-size: 14px; letter-spacing: .04em; }
 
 @media (max-width: 767px) {
   .welcome-card { padding: 32px 20px 40px; }
@@ -965,3 +963,205 @@ html.welcoming .app, html.welcoming .tabbar, html.welcoming #drawerRoot { displa
 
 /* The main region is only a focus target for skip links and screen changes; it is not interactive, so no ring */
 #viewRoot:focus, #viewRoot:focus-visible { outline: none; }
+
+/* ═══════════════════════════════════════════════════════════════
+   PAPEL v2: textured canvas, anchored sidebar, desktop bento Home,
+   navy hero, tinted stat cards, ticket-style receipts, rubber stamps.
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  --paper-sidebar: #F3EDE0;
+  --pill-from: #17305A;
+  --pill-to: #23457A;
+  --hero-from: #17305A;
+  --hero-to: #0F203C;
+  --grad-from: #1B2A41;
+  --grad-to: #2B4C7E;
+  --marker: rgba(245, 183, 0, 0.55);
+  --tile-navy: #17305A;
+  --dot: rgba(27, 42, 65, 0.075);
+  --glow-a: rgba(245, 183, 0, 0.11);
+  --glow-b: rgba(23, 48, 90, 0.07);
+  --warm-shadow: 0 1px 2px rgba(91, 64, 22, 0.06), 0 4px 12px -4px rgba(91, 64, 22, 0.12);
+  --warm-shadow-hover: 0 2px 4px rgba(91, 64, 22, 0.08), 0 12px 24px -8px rgba(91, 64, 22, 0.20);
+  --hero-watermark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 160' fill='none' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M14 6H106V152L95 143L84 152L73 143L62 152L51 143L40 152L29 143L14 152Z' stroke='%23FFFFFF' stroke-opacity='.10'/%3E%3Cpath d='M32 36H88M32 56H88M32 76H64' stroke='%23FFFFFF' stroke-opacity='.10'/%3E%3Cpath d='M36 110L52 124L86 92' stroke='%23F5B700' stroke-opacity='.20'/%3E%3C/svg%3E");
+}
+[data-theme='dark'] {
+  --paper-sidebar: #13213A;
+  --pill-from: #2B4C7E;
+  --pill-to: #3A5F96;
+  --grad-from: #FBF7EF;
+  --grad-to: #C3CCDA;
+  --marker: rgba(245, 183, 0, 0.35);
+  --tile-navy: #8FA9D6;
+  --dot: rgba(251, 247, 239, 0.05);
+  --glow-a: rgba(245, 183, 0, 0.06);
+  --glow-b: rgba(143, 169, 214, 0.06);
+  --warm-shadow: 0 1px 2px rgba(0, 0, 0, 0.30), 0 4px 12px -4px rgba(0, 0, 0, 0.40);
+  --warm-shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 24px -8px rgba(0, 0, 0, 0.55);
+}
+
+/* 1. Canvas: warm mesh glow + 20px dot-matrix paper. Header, welcome and ticket notches
+      share the fixed background so they line up seamlessly. */
+body, .topbar, .welcome, html.welcoming .welcome, .doc-perf.ticket::before, .doc-perf.ticket::after, .rec-card.doc-card .doc-perf::before, .rec-card.doc-card .doc-perf::after {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.6px),
+    radial-gradient(60rem 36rem at 100% -10%, var(--glow-a), transparent 70%),
+    radial-gradient(48rem 32rem at -10% 110%, var(--glow-b), transparent 70%);
+  background-size: 20px 20px, 100% 100%, 100% 100%;
+  background-attachment: fixed;
+}
+
+/* Sidebar: its own surface, crisp edge, gradient pill with a marigold marker */
+.sidebar { width: 260px; background: var(--paper-sidebar); border-right: 1px solid var(--line); }
+.nav-item.active {
+  position: relative; color: #FFFFFF;
+  background: linear-gradient(90deg, var(--pill-from), var(--pill-to));
+  box-shadow: 0 2px 6px -2px rgba(23, 48, 90, 0.45);
+}
+.nav-item.active::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px;
+  border-radius: 0 4px 4px 0; background: var(--accent);
+}
+.nav-item.active .lucide { color: #FFFFFF; }
+.sidebar-note { border-top: 1px dashed var(--line-strong); }
+@media (min-width: 768px) and (max-width: 1023px) { .sidebar { width: 232px; } }
+
+/* 2. Wider canvas and the Home bento grid */
+.view { max-width: 1360px; }
+.home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.home-main, .home-side { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.home-main { container: homemain / inline-size; }
+.home-main .next-card { margin-bottom: 0; }
+.home-main .tiles { grid-template-columns: minmax(0, 1fr); gap: 24px; margin: 0; }
+@container homemain (min-width: 540px) {
+  .home-main .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .home-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
+}
+.home-side .card.receipt { margin-bottom: 10px; }
+.home-side .doc-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Quick scan card (secondary: no filled button, the dropzone is the action) */
+.quick-scan .card-sub { margin-top: 4px; }
+.dropzone.dropzone-quick {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+  margin-top: 16px; padding: 28px 16px; border: 2px dashed var(--field); border-radius: 12px;
+  background: var(--paper-2); transition: transform .15s, border-color .15s, background .15s;
+}
+.dropzone.dropzone-quick:hover, .dropzone.dropzone-quick.over { border-color: var(--brand); background: var(--brand-soft); transform: translateY(-2px); }
+.dropzone-quick .lucide { width: 32px; height: 32px; margin-bottom: 4px; color: var(--brand); }
+.dz-title { font-weight: 700; font-size: 16px; color: var(--ink); max-width: 30ch; }
+.dz-sub { font-size: 14px; color: var(--ink-soft); }
+.quick-ask { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; }
+.quick-ask .lucide { width: 18px; height: 18px; }
+
+/* 3. Hero "Next step": navy gradient, watermark, marigold action */
+.next-card, .next-card.caught-up {
+  position: relative; overflow: hidden; color: #FFFFFF; border: 1px solid transparent;
+  background: var(--hero-watermark) no-repeat right -24px bottom -36px / 180px auto, linear-gradient(135deg, var(--hero-from) 0%, var(--hero-to) 100%);
+  box-shadow: 0 1px 2px rgba(15, 32, 60, 0.20), 0 14px 32px -16px rgba(15, 32, 60, 0.55);
+}
+[data-theme='dark'] .next-card, [data-theme='dark'] .next-card.caught-up { border-color: rgba(255, 255, 255, 0.10); }
+.next-card .eyebrow { color: var(--accent); }
+.next-card.caught-up .eyebrow { color: #86EFAC; }
+.next-card .next-title { color: #FFFFFF; font-size: 28px; line-height: 1.25; }
+.next-card .next-meta, .next-card .next-meta span { color: #FFFFFF; }
+.next-card .next-from { color: #E2E8F0; }
+.next-card .badge { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.26); color: #FFFFFF; }
+.next-card .badge-warn { color: #FDBA74; }
+.next-card .badge-danger { color: #FCA5A5; }
+.next-card .badge-ok { color: #86EFAC; }
+.next-card .btn-primary { background: var(--accent); color: #1B2A41; font-weight: 800; box-shadow: none; }
+.next-card .btn-primary .lucide { color: #1B2A41; }
+.next-card .btn-primary:hover:not(:disabled) { background: #FFC524; box-shadow: 0 0 0 4px rgba(245, 183, 0, 0.22), 0 8px 22px -6px rgba(245, 183, 0, 0.55); }
+.next-card .link-btn { color: #FFFFFF; text-decoration-color: rgba(255, 255, 255, 0.65); text-decoration-thickness: 1.5px; }
+.next-card .link-btn:hover { color: #FFFFFF; text-decoration-color: #FFFFFF; }
+.next-card :focus-visible { outline: 2px solid #FFFFFF; outline-offset: 3px; }
+
+/* 4a. Gradient display type + marigold marker under the first name */
+.greet, .tile-value {
+  color: var(--ink);
+  background-image: linear-gradient(90deg, var(--grad-from), var(--grad-to));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.greet .hl-name {
+  color: var(--ink); -webkit-text-fill-color: var(--ink);
+  -webkit-background-clip: border-box; background-clip: border-box;
+  background-image: linear-gradient(transparent 58%, var(--marker) 58%, var(--marker) 90%, transparent 90%);
+  padding: 0 .12em; margin: 0 -.04em; border-radius: 2px;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+@media (forced-colors: active) {
+  .greet, .tile-value, .greet .hl-name { -webkit-text-fill-color: currentColor; background: none; }
+}
+
+/* 4b. Stat cards: semantic top tint, 3px top rule, warm layered shadow, -2px lift */
+.tile {
+  border: 1px solid var(--line); border-top: 3px solid var(--tile-c, var(--line-strong));
+  background: linear-gradient(180deg, var(--tile-tint, var(--paper-2)) 0%, var(--card) 72%);
+  box-shadow: var(--warm-shadow); transition: transform .18s ease, box-shadow .18s ease;
+  container-type: inline-size;
+}
+.tile:hover { transform: translateY(-2px); box-shadow: var(--warm-shadow-hover); }
+.tile-paid { --tile-c: var(--paid); --tile-tint: var(--paid-soft); }
+.tile-due { --tile-c: var(--due); --tile-tint: var(--due-soft); }
+.tile-clear { --tile-c: var(--tile-navy); --tile-tint: var(--brand-soft); }
+.tile-value { font-size: 24px; font-size: clamp(20px, 13cqi, 30px); line-height: 1.2; }
+
+/* Heading scale 28 / 22 / 18 */
+.page-title, .drawer-title { font-size: 28px; }
+.card-title, .modal-title, .empty-title, .clear-headline { font-size: 22px; }
+.rec-title, .doc-card .rec-title, .group-title, .drawer-h, .pop-title { font-size: 18px; }
+@media (max-width: 767px) { .page-title { font-size: 28px; } .next-card .next-title { font-size: 24px; } }
+
+/* 4c. Receipts: deeper zigzag, ticket perforation with side notches */
+.receipt::after, .rec-card.doc-card::after { bottom: -10px; height: 11px; background-size: 16px 11px; }
+.rec-card.doc-card, .card.receipt { filter: drop-shadow(0 2px 2px rgba(91, 64, 22, 0.09)); }
+.rec-card.doc-card:hover { filter: drop-shadow(0 6px 8px rgba(91, 64, 22, 0.16)); }
+[data-theme='dark'] .rec-card.doc-card, [data-theme='dark'] .card.receipt { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45)); }
+.rec-card.doc-card { --pad: 20px; padding: 18px var(--pad) 22px; }
+.card.receipt { --pad: 24px; padding-left: var(--pad); padding-right: var(--pad); }
+@media (max-width: 767px) { .card.receipt { --pad: 20px; } }
+.doc-perf, .doc-perf.ticket {
+  display: block; position: relative; height: 0; width: auto;
+  border: 0; border-top: 2px dashed var(--line); margin: 10px 0 4px;
+}
+.doc-perf.ticket { margin: 4px 0 8px; }
+.rec-card.doc-card .doc-perf::before, .rec-card.doc-card .doc-perf::after,
+.doc-perf.ticket::before, .doc-perf.ticket::after {
+  content: ''; position: absolute; top: -10px; width: 10px; height: 18px; border: 1px solid var(--line-strong);
+}
+.rec-card.doc-card .doc-perf::before, .doc-perf.ticket::before { left: calc(-1 * var(--pad) - 1px); border-left: 0; border-radius: 0 10px 10px 0; }
+.rec-card.doc-card .doc-perf::after, .doc-perf.ticket::after { right: calc(-1 * var(--pad) - 1px); border-right: 0; border-radius: 10px 0 0 10px; }
+.receipt .doc-row { border-top: 2px dashed var(--line); }
+.receipt .doc-perf.ticket + .doc-row { border-top: 0; }
+
+/* 4d. Rubber stamps: double border, tilted -3deg */
+.stamp {
+  border: 1.5px solid currentColor; border-radius: 5px; padding: 3px 10px; margin: 6px 5px;
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px currentColor;
+  transform: rotate(-3deg); background: var(--card);
+}
+.doc-row:hover .stamp { box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px currentColor; }
+
+/* v2 refinements after visual review */
+:root {
+  --hero-watermark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 180' fill='none' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'%3E%3Cg transform='rotate(-10 70 90)'%3E%3Cpath d='M24 16H116V162L105 153L94 162L83 153L72 162L61 153L50 162L39 153L24 162Z' stroke='%23FFFFFF' stroke-opacity='.08'/%3E%3Cpath d='M42 46H98M42 66H98M42 86H74' stroke='%23FFFFFF' stroke-opacity='.08'/%3E%3Cpath d='M46 118L62 132L96 100' stroke='%23F5B700' stroke-opacity='.16'/%3E%3C/g%3E%3C/svg%3E");
+}
+.next-card, .next-card.caught-up {
+  background: var(--hero-watermark) no-repeat right 16px bottom -18px / 150px auto, linear-gradient(135deg, var(--hero-from) 0%, var(--hero-to) 100%);
+}
+/* Stat figures: larger in the 3-up row */
+.tile-value { font-size: clamp(20px, 16cqi, 30px); }
+
+/* Recent documents: when the side column is narrow, the stamp moves under the title */
+.home-side { container: homeside / inline-size; }
+@container homeside (max-width: 479px) {
+  .home-side .doc-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 4px; align-items: center; }
+  .home-side .doc-row .doc-main { grid-column: 1; grid-row: 1; }
+  .home-side .doc-row .stamp { grid-column: 1; grid-row: 2; justify-self: start; margin: 8px 0 6px 4px; }
+  .home-side .doc-row > svg, .home-side .doc-row > i { grid-column: 2; grid-row: 1 / span 2; }
+}

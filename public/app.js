@@ -290,56 +290,71 @@
     const recent = state.records.slice(0, 3);
     const paidDocs = state.records.filter((r) => !isCredit(r) && Number(r.amountPaid) > 0).length;
     const owing = s.balance > 0;
-
-    if (!state.records.length) {
-      return `
-        <div class="page-head"><div><h1 class="page-title">Magandang araw, ${esc(st.first)}</h1><p class="page-sub">Ito ang kailangan mong gawin ngayon.</p></div></div>
-        ${nextStepHtml()}`;
-    }
-
-    return `
+    const greet = `
       <div class="page-head">
         <div>
-          <h1 class="page-title">Magandang araw, ${esc(st.first)}</h1>
+          <h1 class="page-title greet">Magandang araw, <span class="hl-name">${esc(st.first)}</span></h1>
           <p class="page-sub">Ito ang kailangan mong gawin ngayon.</p>
         </div>
-      </div>
+      </div>`;
 
-      ${nextStepHtml()}
+    if (!state.records.length) return greet + nextStepHtml();
 
-      <section class="tiles" aria-label="Where you stand">
-        <div class="tile">
-          <div class="tile-label"><span class="dot ok" aria-hidden="true"></span>Paid so far</div>
-          <div class="tile-value">${pesoTile(s.paid)}</div>
-          <div class="tile-foot">${paidDocs ? `From ${paidDocs} receipt${paidDocs === 1 ? '' : 's'}` : 'No payments recorded yet'}</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label"><span class="dot ${owing ? 'warn' : 'ok'}" aria-hidden="true"></span>Still to pay</div>
-          <div class="tile-value">${pesoTile(s.balance)}</div>
-          <div class="tile-foot">${owing ? (s.nextDue ? `Due ${esc(fmtDay(s.nextDue))}` : 'No due date yet') : 'Nothing to pay'}</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label"><span class="dot ${s.tasks && s.pct === 100 ? 'ok' : 'navy'}" aria-hidden="true"></span>Clearance</div>
-          <div class="tile-value">${s.tasks ? `${s.done} of ${s.tasks} done` : 'Not started'}</div>
-          <div class="progress ${s.pct === 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${s.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Clearance progress"><span style="width:${s.pct}%"></span></div>
-        </div>
-      </section>
+    return `${greet}
+      <div class="home-grid">
+        <div class="home-main">
+          ${nextStepHtml()}
 
-      <section class="card receipt" aria-labelledby="recentTitle">
-        <div class="list-head">
-          <h2 id="recentTitle" class="card-title">Recent documents</h2>
-          ${recent.length ? '<button class="link-btn" data-action="goto" data-view="vault" type="button">See all</button>' : ''}
+          <section class="tiles" aria-label="Where you stand">
+            <div class="tile tile-paid">
+              <div class="tile-label"><span class="dot ok" aria-hidden="true"></span>Paid so far</div>
+              <div class="tile-value">${pesoTile(s.paid)}</div>
+              <div class="tile-foot">${paidDocs ? `From ${paidDocs} receipt${paidDocs === 1 ? '' : 's'}` : 'No payments recorded yet'}</div>
+            </div>
+            <div class="tile tile-due">
+              <div class="tile-label"><span class="dot ${owing ? 'warn' : 'ok'}" aria-hidden="true"></span>Still to pay</div>
+              <div class="tile-value">${pesoTile(s.balance)}</div>
+              <div class="tile-foot">${owing ? (s.nextDue ? `Due ${esc(fmtDay(s.nextDue))}` : 'No due date yet') : 'Nothing to pay'}</div>
+            </div>
+            <div class="tile tile-clear">
+              <div class="tile-label"><span class="dot ${s.tasks && s.pct === 100 ? 'ok' : 'navy'}" aria-hidden="true"></span>Clearance</div>
+              <div class="tile-value">${s.tasks ? `${s.done} of ${s.tasks} done` : 'Not started'}</div>
+              <div class="progress ${s.pct === 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${s.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Clearance progress"><span style="width:${s.pct}%"></span></div>
+            </div>
+          </section>
         </div>
-        ${recent.length ? recent.map((r) => `
-          <button class="doc-row" data-action="open-record" data-id="${esc(r.id)}" type="button">
-            <span class="doc-main">
-              <div class="doc-title">${esc(r.title)}</div>
-              <div class="doc-sub"><span class="ref">${esc(r.referenceNo)}</span> · ${esc(r.createdAt || '')}</div>
-            </span>
-            ${stampHtml(docStatus(r))}
-            <i data-lucide="chevron-right" aria-hidden="true"></i>
-          </button>`).join('') : `<p class="card-sub">Your scanned receipts and memos will show up here.</p>`}
-      </section>`;
+
+        <div class="home-side">
+          <section class="card receipt recent-card" aria-labelledby="recentTitle">
+            <div class="list-head">
+              <h2 id="recentTitle" class="card-title">Recent documents</h2>
+              ${recent.length ? '<button class="link-btn" data-action="goto" data-view="vault" type="button">See all</button>' : ''}
+            </div>
+            <span class="doc-perf ticket" aria-hidden="true"></span>
+            ${recent.map((r) => `
+              <button class="doc-row" data-action="open-record" data-id="${esc(r.id)}" type="button">
+                <span class="doc-main">
+                  <div class="doc-title">${esc(r.title)}</div>
+                  <div class="doc-sub"><span class="ref">${esc(r.referenceNo)}</span> · ${esc(r.createdAt || '')}</div>
+                </span>
+                ${stampHtml(docStatus(r))}
+                <i data-lucide="chevron-right" aria-hidden="true"></i>
+              </button>`).join('')}
+          </section>
+
+          <section class="card quick-scan" aria-labelledby="quickTitle">
+            <h2 id="quickTitle" class="card-title">Quick scan</h2>
+            <p class="card-sub">May bagong resibo? I-drop mo dito at babasahin namin agad.</p>
+            <label class="dropzone dropzone-quick" id="dropzone">
+              <i data-lucide="upload-cloud"></i>
+              <span class="dz-title">Drag a photo or PDF here, or tap to choose</span>
+              <span class="dz-sub">JPG, PNG, WebP, TIFF or PDF. Up to 10 MB.</span>
+              <input id="fileInput" type="file" accept=".pdf,image/png,image/jpeg,image/webp,image/tiff" />
+            </label>
+            <button class="link-btn quick-ask" data-action="goto" data-view="buddy" type="button"><i data-lucide="message-circle"></i>May tanong? Ask EasyBo</button>
+          </section>
+        </div>
+      </div>`;
   }
 
   function taskRow(t, large = false) {
@@ -725,6 +740,7 @@
     resetScan();
     const sc = state.scan;
     sc.file = file; sc.fileName = file.name; sc.previewType = type; sc.previewUrl = URL.createObjectURL(file);
+    if (state.view !== 'scanner') setView('scanner'); // dropped on the Home quick-scan card
     processFile();
   }
 
