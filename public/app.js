@@ -86,12 +86,12 @@
   // Students never see server or vendor wording. Technical detail goes to the console only.
   function plainError(raw, status) {
     const s = String(raw || '');
-    if (/failed to fetch|networkerror|load failed|network request/i.test(s)) return 'We cannot reach the server. Please check your internet connection and try again.';
-    if (/no file uploaded/i.test(s)) return 'Please choose a photo or PDF first.';
-    if (/ocr failed|unprocess|could not read|no text/i.test(s) || status === 422) return 'We could not read that file. Try a clear, well-lit photo with the whole paper showing.';
-    if (/timed? ?out|too long/i.test(s)) return 'That took too long. Please try again.';
-    if (/too large|file ?size|10 ?mib|limit/i.test(s) || status === 413) return 'That file is too big. Please use a smaller photo (under 10 MB).';
-    return 'Something went wrong on our side. Please try again in a moment.';
+    if (/failed to fetch|networkerror|load failed|network request/i.test(s)) return 'Hindi ma-reach ang server. Check mo ang internet mo, tapos try ulit.';
+    if (/no file uploaded/i.test(s)) return 'Pumili muna ng photo o PDF.';
+    if (/ocr failed|unprocess|could not read|no text/i.test(s) || status === 422) return 'Hindi namin mabasa ang file na iyon. Subukan ang malinaw at maliwanag na photo, kita ang buong papel.';
+    if (/timed? ?out|too long/i.test(s)) return 'Natagalan masyado. Try ulit.';
+    if (/too large|file ?size|10 ?mib|limit/i.test(s) || status === 413) return 'Masyadong malaki ang file. Gumamit ng mas maliit na photo (under 10 MB).';
+    return 'May nagka-problema sa amin. Try ulit mamaya.';
   }
   async function api(path, opts = {}) {
     let res;
@@ -319,13 +319,13 @@
           <div class="tile-foot">${owing ? (s.nextDue ? `Due ${esc(fmtDay(s.nextDue))}` : 'No due date yet') : 'Nothing to pay'}</div>
         </div>
         <div class="tile">
-          <div class="tile-label"><span class="dot ${s.tasks && s.pct === 100 ? 'ok' : 'indigo'}" aria-hidden="true"></span>Clearance</div>
+          <div class="tile-label"><span class="dot ${s.tasks && s.pct === 100 ? 'ok' : 'navy'}" aria-hidden="true"></span>Clearance</div>
           <div class="tile-value">${s.tasks ? `${s.done} of ${s.tasks} done` : 'Not started'}</div>
           <div class="progress ${s.pct === 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${s.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Clearance progress"><span style="width:${s.pct}%"></span></div>
         </div>
       </section>
 
-      <section class="card" aria-labelledby="recentTitle">
+      <section class="card receipt" aria-labelledby="recentTitle">
         <div class="list-head">
           <h2 id="recentTitle" class="card-title">Recent documents</h2>
           ${recent.length ? '<button class="link-btn" data-action="goto" data-view="vault" type="button">See all</button>' : ''}
@@ -336,6 +336,7 @@
               <div class="doc-title">${esc(r.title)}</div>
               <div class="doc-sub"><span class="ref">${esc(r.referenceNo)}</span> · ${esc(r.createdAt || '')}</div>
             </span>
+            ${stampHtml(docStatus(r))}
             <i data-lucide="chevron-right" aria-hidden="true"></i>
           </button>`).join('') : `<p class="card-sub">Your scanned receipts and memos will show up here.</p>`}
       </section>`;
@@ -352,9 +353,17 @@
         </span>
       </label>`;
   }
+  // Simple line art: a torn receipt, a folder, or a checklist. One sentence, one button.
+  const SVG_OPEN = '<svg class="empty-art" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+  const EMPTY_ART = {
+    receipt: SVG_OPEN + '<path d="M24 10H72V84L66 78L60 84L54 78L48 84L42 78L36 84L30 78L24 84Z"/><path d="M34 26H62M34 38H62" /><path d="M34 50H54" stroke-dasharray="3 5"/><path class="art-accent" d="M34 64L40 70L52 56" /></svg>',
+    folder: SVG_OPEN + '<path d="M12 28A6 6 0 0 1 18 22H36L44 30H78A6 6 0 0 1 84 36V72A6 6 0 0 1 78 78H18A6 6 0 0 1 12 72Z"/><path d="M28 54H68" stroke-dasharray="3 5"/><path class="art-accent" d="M28 64H48" /></svg>',
+    checklist: SVG_OPEN + '<rect x="18" y="16" width="14" height="14" rx="3"/><rect x="18" y="41" width="14" height="14" rx="3"/><rect x="18" y="66" width="14" height="14" rx="3"/><path d="M42 23H78M42 48H78M42 73H78" stroke-dasharray="3 5"/><path class="art-accent" d="M21 23L25 27L30 19" /></svg>'
+  };
+  const ART_FOR = { 'folder-open': 'folder', 'list-checks': 'checklist' };
   function emptyState(icon, title, text, cta, view, action) {
     const attrs = action ? `data-action="${action}"` : `data-action="goto" data-view="${view}"`;
-    return `<div class="empty"><p class="empty-title">${esc(title)}</p><p>${esc(text)}</p><button class="btn btn-primary" ${attrs} type="button">${esc(cta)}</button></div>`;
+    return `<div class="empty">${EMPTY_ART[ART_FOR[icon] || 'receipt']}<p class="empty-title">${esc(title)}</p><p>${esc(text)}</p><button class="btn btn-primary" ${attrs} type="button">${esc(cta)}</button></div>`;
   }
 
   async function markTask(recId, taskId, paid) {
@@ -369,7 +378,7 @@
     }
     renderView();
     await syncRecords();
-    toast(paid ? 'Marked as paid. Salamat!' : 'Nice! Marked as done.', 'ok', {
+    toast(paid ? 'Marked as paid. Salamat!' : 'Nice! Tapos na ito.', 'ok', {
       label: 'Undo',
       fn: async () => { state.records = JSON.parse(snapshot); renderView(); await syncRecords(); }
     });
@@ -388,7 +397,7 @@
       const cls = n < current ? 'done' : n === current ? 'active' : '';
       return `<li class="step ${cls}" ${n === current ? 'aria-current="step"' : ''}><span class="step-n">${n < current ? '✓' : n}</span><span>${label}</span></li>${n < 3 ? '<li class="step-line" aria-hidden="true"></li>' : ''}`;
     }).join('');
-    const sub = sc.saved ? 'All done.' : { 1: 'Add a photo or PDF of your receipt or memo.', 2: 'Here is what we found. Check it against your paper.', 3: 'Almost done. Review and save.' }[sc.step];
+    const sub = sc.saved ? 'Tapos na!' : (sc.step === 2 && sc.processing) ? 'Sandali lang, binabasa pa namin ang papel mo.' : { 1: 'Kunan o i-upload ang resibo o memo mo.', 2: 'Ito ang nabasa namin. Ikumpara sa papel mo.', 3: 'Konti na lang! Tingnan, tapos i-save.' }[sc.step];
     const body = sc.saved ? scanSaved() : sc.step === 1 ? scanStep1() : sc.step === 2 ? scanStep2() : scanStep3();
     return `
       <div class="page-head"><div><h1 class="page-title">Scan a document</h1><p class="page-sub">${sub}</p></div></div>
@@ -426,7 +435,7 @@
   }
 
   // ── Step 2: Check ──
-  const stageText = (sc) => (sc.stage === 'organizing' ? 'Finding the amounts and dates…' : 'Reading your document… Sandali lang!');
+  const stageText = (sc) => (sc.stage === 'organizing' ? 'Hinahanap ang amounts at dates…' : 'Reading your document… Sandali lang!');
 
   function scanStep2() {
     const sc = state.scan;
@@ -440,11 +449,9 @@
       return `
         <div class="split">${left}
           <div class="card" aria-busy="true">
-            <div class="row" style="color:var(--brand);margin-bottom:8px"><span class="spinner"></span><strong id="stageText">${stageText(sc)}</strong></div>
-            <p class="card-sub">This can take up to 20 seconds. Please keep this page open.</p>
-            <div class="skel-stack" style="margin-top:24px">
-              ${'<div><div class="skeleton" style="width:35%;height:14px;margin-bottom:8px"></div><div class="skeleton" style="height:44px"></div></div>'.repeat(5)}
-            </div>
+            <div class="printer" aria-hidden="true"><div class="printer-slot"></div><div class="printer-window"><div class="printer-paper"><span></span><span class="short"></span><span></span><span class="short"></span><span></span></div></div></div>
+            <div class="row" style="color:var(--brand);margin-bottom:8px;justify-content:center"><span class="spinner"></span><strong id="stageText">${stageText(sc)}</strong></div>
+            <p class="card-sub" style="text-align:center;margin:0 auto">Mga 20 segundo lang ito. Huwag mong isara ang page na ito.</p>
           </div>
         </div>`;
     }
@@ -485,7 +492,7 @@
           <details class="disclose" data-detail="showText" ${sc.showText || sc.editWord ? 'open' : ''}>
             <summary>View scanned text</summary>
             <div class="disclose-body">
-              <p class="card-sub">Tap a word that looks wrong and type the right one. Fixing a word helps the scanner get better.</p>
+              <p class="card-sub">I-tap ang word na mali at i-type ang tama. Fixing a word helps the scanner get better.</p>
               <div id="wordArea" class="word-area">${wordAreaHtml()}</div>
             </div>
           </details>` : ''}
@@ -501,7 +508,7 @@
     const flagged = isFlagged(name);
     return `
       <div class="field ${span} ${flagged ? 'flag' : ''}" data-wrap="${name}">
-        <div class="field-top"><label for="f_${name}">${label}</label><span class="flag-tag" ${flagged ? '' : 'hidden'}><i data-lucide="alert-triangle"></i>Please check</span></div>
+        <div class="field-top"><label for="f_${name}">${label}</label><span class="flag-tag" ${flagged ? '' : 'hidden'}><i data-lucide="alert-triangle"></i>Pakicheck</span></div>
         ${control}
       </div>`;
   }
@@ -516,8 +523,8 @@
   function bannerHtml() {
     const n = flaggedCount();
     return n
-      ? `<div class="banner warn" id="flagBanner" role="status"><i data-lucide="alert-triangle"></i><div><strong>Please check these details before saving.</strong><div>${n} ${n === 1 ? 'field is' : 'fields are'} marked in amber.</div></div></div>`
-      : `<div class="banner ok" id="flagBanner" role="status"><i data-lucide="check-circle-2"></i><div><strong>Everything is filled in.</strong><div>Please still take a quick look before saving.</div></div></div>`;
+      ? `<div class="banner warn" id="flagBanner" role="status"><i data-lucide="alert-triangle"></i><div><strong>Pakicheck muna bago i-save.</strong><div>${n} ${n === 1 ? 'field ang' : 'fields ang'} may tatak na Pakicheck.</div></div></div>`
+      : `<div class="banner ok" id="flagBanner" role="status"><i data-lucide="check-circle-2"></i><div><strong>Kumpleto na lahat!</strong><div>Tingnan lang ulit bago i-save.</div></div></div>`;
   }
   function refreshFlags() {
     FIELD_NAMES.forEach((n) => {
@@ -631,7 +638,7 @@
       sc.corrections[ed.index] = text;
       applyCorrectionToFields(ed.original, text);
       sc.editWord = null;
-      toast('Thanks! Fixing words helps the scanner get better.');
+      toast('Salamat! Mas gagaling ang scanner dahil dito.');
     } catch (e) {
       ed.busy = false; toast(e.message, 'error');
     }
@@ -696,8 +703,8 @@
       <div class="scan-narrow">
         <section class="card next-card caught-up" aria-labelledby="doneTitle">
           <p class="eyebrow"><i data-lucide="check-circle-2" style="vertical-align:-3px"></i> Saved</p>
-          <h2 id="doneTitle" class="next-title">${esc(sc.savedTitle)} is in My Documents</h2>
-          <p class="next-from">${n ? `We added ${n} ${n === 1 ? 'step' : 'steps'} to Clearance &amp; Payments.` : 'You can find it any time under My Documents.'}</p>
+          <h2 id="doneTitle" class="next-title">Naka-save na! Safe na ang resibo mo.</h2>
+          <p class="next-from">${n ? `Idinagdag namin ang ${n} ${n === 1 ? 'step' : 'steps'} sa Clearance &amp; Payments.` : `${esc(sc.savedTitle)} ay nasa My Documents na.`}</p>
           <div class="next-actions">
             <button class="btn btn-primary btn-lg" data-action="scan-another" type="button"><i data-lucide="scan-line"></i>Scan another</button>
             <button class="link-btn" data-action="view-saved" type="button">View document</button>
@@ -791,7 +798,7 @@
     await addRecord(record);
     sc.saving = false; sc.saved = true; sc.savedId = record.id; sc.savedTitle = record.title;
     renderView(); window.scrollTo({ top: 0 });
-    toast('Saved to My Documents.', 'ok', { label: 'View document', fn: () => viewSaved(record.id) });
+    toast('Naka-save na! Safe na ang resibo mo.', 'ok', { label: 'View document', fn: () => viewSaved(record.id) });
   }
   function viewSaved(id) { setView('vault'); openRecord(id); }
 
@@ -814,12 +821,14 @@
     const open = tasks.filter((t) => !t.done).length;
     const owing = Number(r.balanceDue) > 0;
     const m = dueMeta(r.deadline);
-    if ((owing || open) && m && m.days < 0) return { cls: 'badge-danger', icon: 'alert-circle', label: 'Overdue' };
-    if (owing) return { cls: 'badge-warn', icon: 'clock', label: m && m.days <= 7 ? 'Due soon' : 'Balance due' };
-    if (open) return { cls: 'badge-warn', icon: 'clock', label: `${open} to do` };
-    if (Number(r.amountPaid) > 0) return { cls: 'badge-ok', icon: 'check', label: isCredit(r) ? 'Credited' : 'Paid' };
-    return { cls: 'badge-ok', icon: 'check', label: tasks.length ? 'Done' : 'Saved' };
+    if ((owing || open) && m && m.days < 0) return { icon: 'alert-circle', tone: 'overdue', stamp: 'Overdue' };
+    if (owing) return { icon: 'clock', tone: 'due', stamp: 'May balance' };
+    if (open) return { icon: 'clock', tone: 'due', stamp: 'May gagawin' };
+    if (Number(r.amountPaid) > 0) return { icon: 'check', tone: 'paid', stamp: isCredit(r) ? 'Credited' : 'Paid' };
+    return tasks.length ? { icon: 'check', tone: 'paid', stamp: 'Tapos na' } : { icon: 'check', tone: 'neutral', stamp: 'Naka-save' };
   }
+  // Stamp chip: bordered, uppercase, tilted. Color + icon + word, as the UX rules require.
+  const stampHtml = (st) => `<span class="stamp stamp-${st.tone}"><i data-lucide="${st.icon}"></i>${esc(st.stamp)}</span>`;
 
   function recordCard(r) {
     const st = docStatus(r);
@@ -829,15 +838,17 @@
       <button class="rec-card doc-card" data-action="open-record" data-id="${esc(r.id)}" type="button">
         <div class="doc-top">
           <span class="doc-type"><i data-lucide="${CATEGORY_ICON[r.category] || 'file-text'}"></i>${esc(r.category)}</span>
-          <span class="badge ${st.cls}"><i data-lucide="${st.icon}"></i>${esc(st.label)}</span>
+          ${stampHtml(st)}
         </div>
         <h3 class="rec-title">${esc(r.title)}</h3>
+        <div class="doc-ref">${/^(n\/a|note)?$/i.test(r.referenceNo || '') ? '&nbsp;' : esc(r.referenceNo)}</div>
+        <span class="doc-perf" aria-hidden="true"></span>
         <div class="doc-meta"><span>${esc(r.createdAt || '')}</span>${amount ? `<span class="doc-amt">${amount}</span>` : ''}</div>
       </button>`;
   }
 
   function vaultGridHtml() {
-    if (!state.records.length) return emptyState('folder-open', 'No documents yet', 'Scan a receipt or memo and it will show up here.', 'Scan your first document', 'scanner');
+    if (!state.records.length) return emptyState('folder-open', 'Wala pang resibo dito', 'Mag-scan ng resibo o memo, at lalabas dito agad.', 'Scan your first document', 'scanner');
     const list = filteredRecords();
     if (!list.length) return `<div class="empty"><p class="empty-title">No matches</p><p>Try a different word, or show everything again.</p><button class="btn btn-ghost" data-action="clear-search" type="button">Clear search</button></div>`;
     return `<div class="vault-grid">${list.map(recordCard).join('')}</div>`;
@@ -849,7 +860,7 @@
       `<button class="chip ${state.vaultCat === k ? 'active' : ''}" data-action="vault-cat" data-cat="${k}" aria-pressed="${state.vaultCat === k}" type="button">${label}</button>`).join('');
     return `
       <div class="page-head">
-        <div><h1 class="page-title">My Documents</h1><p class="page-sub">Your receipts, memos and notes in one place.</p></div>
+        <div><h1 class="page-title">My Documents</h1><p class="page-sub">Wala nang kupas na resibo. Nandito lahat ng papeles mo.</p></div>
         <div class="row">
           <button class="btn ${has ? 'btn-ghost' : 'btn-ghost'}" data-action="quick-note" type="button"><i data-lucide="square-pen"></i>New note</button>
           ${has ? '<button class="btn btn-primary" data-action="goto" data-view="scanner" type="button"><i data-lucide="scan-line"></i>Scan a document</button>' : ''}
@@ -901,7 +912,7 @@
     panel.innerHTML = `
       <div class="drawer-head">
         <div class="drawer-titles">
-          <div class="row"><span class="badge ${st.cls}"><i data-lucide="${st.icon}"></i>${esc(st.label)}</span><span class="doc-type">${esc(r.category)}</span></div>
+          <div class="row">${stampHtml(st)}<span class="doc-type">${esc(r.category)}</span></div>
           <h2 id="drawerTitle" class="drawer-title">${esc(r.title)}</h2>
           <div class="drawer-sub"><span class="ref">${esc(r.referenceNo)}</span> · Filed ${esc(r.createdAt || '')}</div>
         </div>
@@ -990,7 +1001,7 @@
     const tabs = [['payments', 'Payments'], ['clearance', 'Clearance']].map(([k, label]) =>
       `<button role="tab" id="tab-${k}" class="tab" aria-selected="${tab === k}" aria-controls="panel-${k}" tabindex="${tab === k ? 0 : -1}" data-action="cp-tab" data-tab="${k}" type="button">${label}</button>`).join('');
     return `
-      <div class="page-head"><div><h1 class="page-title">Clearance &amp; Payments</h1><p class="page-sub">What you paid, what you still owe, and what to submit.</p></div></div>
+      <div class="page-head"><div><h1 class="page-title">Clearance &amp; Payments</h1><p class="page-sub">Ito ang mga bayad at requirements mo, nasa isang lugar.</p></div></div>
       <div class="tabs" role="tablist" aria-label="Clearance and payments">${tabs}</div>
       <div role="tabpanel" id="panel-${tab}" aria-labelledby="tab-${tab}" tabindex="0">${tab === 'payments' ? paymentsPanel() : clearancePanel()}</div>`;
   }
@@ -1018,7 +1029,7 @@
   }
   function paymentsPanel() {
     const rows = paymentRows();
-    if (!rows.length) return emptyState('wallet', 'No payments yet', 'Scan a receipt and your payments will be listed here.', 'Scan your first document', 'scanner');
+    if (!rows.length) return emptyState('wallet', 'Wala pang bayad na naka-record', 'Mag-scan ng resibo para makita mo rito ang mga bayad mo.', 'Scan your first document', 'scanner');
     const s = stats();
     const body = rows.map((row) => `
       <tr>
@@ -1047,7 +1058,7 @@
 
   function clearancePanel() {
     const s = stats();
-    if (!s.tasks) return emptyState('list-checks', 'No requirements yet', 'Scan a clearance memo and your to-do list builds itself.', 'Scan your first document', 'scanner');
+    if (!s.tasks) return emptyState('list-checks', 'Wala pang requirements', 'Mag-scan ng clearance memo, at gagawan namin ng checklist.', 'Scan your first document', 'scanner');
     const left = s.tasks - s.done;
     const headline = left === 0 ? `All ${s.tasks} done. Nice work!` : `${s.done} of ${s.tasks} done, ${left} to go`;
     const all = allTasks().map((t) => ({ ...t, office: officeOf(t) }));
@@ -1208,7 +1219,7 @@
       const more = m.sources.length > 3 ? ` and ${m.sources.length - 3} more` : '';
       return `<div class="msg-source"><i data-lucide="file-text"></i><span>From: ${links}${more}</span></div>`;
     }
-    if (m.ai) return `<div class="msg-source"><i data-lucide="sparkles"></i><span>From: Lumen AI, using your saved documents${m.mock ? ' (sample answer)' : ''}</span></div>`;
+    if (m.ai) return `<div class="msg-source"><i data-lucide="sparkles"></i><span>From: EasyBo AI, using your saved documents${m.mock ? ' (sample answer)' : ''}</span></div>`;
     return '';
   }
   function msgHtml(m) {
@@ -1231,7 +1242,7 @@
   }
   function viewBuddy() {
     return `
-      <div class="page-head chat-head"><div><h1 class="page-title">Ask EasyBo</h1><p class="page-sub">Taglish or English. Answers come from your own documents.</p></div></div>
+      <div class="page-head chat-head"><div><h1 class="page-title">Ask EasyBo</h1><p class="page-sub">Tanong lang. Sasagot ako base sa mga document mo.</p></div></div>
       <div class="chat-wrap">
         <div class="card chat-card">
           <div class="chat-log" id="chatLog" role="log" aria-live="polite" aria-label="Conversation" tabindex="0">${chatLogHtml()}</div>
@@ -1281,7 +1292,7 @@
   async function loadDemo() {
     const have = new Set(state.records.map((r) => r.id));
     const fresh = demoRecords().filter((r) => !have.has(r.id));
-    if (!fresh.length) { toast('Demo data is already in this vault.', 'warn'); return; }
+    if (!fresh.length) { toast('Nandito na ang demo data.', 'warn'); return; }
     state.records = [...fresh, ...state.records];
     await syncRecords();
     toast(`Added ${fresh.length} demo records for ${student().first}.`);
@@ -1318,10 +1329,11 @@
         try {
           const d = await postJson('/api/config/mock', { mockMode: !state.mock });
           state.mock = d.mockMode; renderApiMode();
-          toast(state.mock ? 'Mock Mode on. No credits will be used.' : 'Live Lumen API on.', state.mock ? 'warn' : 'ok');
+          toast(state.mock ? 'Mock Mode on. No credits will be used.' : 'Live mode on.', state.mock ? 'warn' : 'ok');
         } catch (err) { toast(err.message, 'error'); }
         break;
       }
+      case 'enter': enterApp(el.dataset.student); break;
       case 'load-demo': loadDemo(); break;
       case 'quick-note': quickNote(); break;
       case 'toggle-task': {
@@ -1336,7 +1348,7 @@
       case 'confirm-delete': confirmDelete(el.dataset.id); break;
       case 'delete-record':
         state.records = state.records.filter((r) => r.id !== el.dataset.id);
-        closeModal(); closeDrawer(); await syncRecords(); toast('Document deleted.'); renderView(); break;
+        closeModal(); closeDrawer(); await syncRecords(); toast('Natanggal na ang document.'); renderView(); break;
       case 'close-modal': closeModal(); break;
       case 'modal-backdrop': if (e.target === el) closeModal(); break;
       case 'clear-search': state.vaultQ = ''; state.vaultCat = 'ALL'; renderView(); break;
@@ -1393,7 +1405,7 @@
         createdAt: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
       };
       closeModal();
-      addRecord(rec).then(() => { toast('Note saved to My Documents.'); renderView(); });
+      addRecord(rec).then(() => { toast('Naka-save na ang note mo.'); renderView(); });
     }
   });
   // Drag & drop upload
@@ -1446,15 +1458,27 @@
     toast('Demo reset.', 'ok', { label: 'Undo', fn: async () => { state.records = JSON.parse(snapshot); renderView(); await syncRecords(); } });
   }
 
-  $('#studentSelect').addEventListener('change', async (e) => {
-    state.studentId = e.target.value;
-    localStorage.setItem('easybo.student', state.studentId);
+  async function switchStudent(id, silent = false) {
+    state.studentId = id;
+    localStorage.setItem('easybo.student', id);
+    $('#studentSelect').value = id;
     state.chat = []; resetScan(); closeDrawer();
     $('#viewRoot').innerHTML = `<div class="skel-stack" aria-busy="true"><div class="skeleton" style="height:28px;width:40%"></div><div class="skeleton" style="height:140px"></div><div class="skeleton" style="height:90px"></div></div>`;
     await loadRecords();
-    toast(`Switched to ${student().name}.`);
+    if (!silent) toast(`Switched to ${student().name}.`);
     renderView(true);
-  });
+  }
+  $('#studentSelect').addEventListener('change', (e) => switchStudent(e.target.value));
+
+  // Welcome screen: demo profiles, no password. Shown once per browser session.
+  async function enterApp(id) {
+    sessionStorage.setItem('easybo.in', '1');
+    document.documentElement.classList.remove('welcoming');
+    if (id && id !== state.studentId) await switchStudent(id, true);
+    setView('dashboard');
+    window.scrollTo({ top: 0 });
+    $('#viewRoot').focus({ preventScroll: true });
+  }
   // Remember which "View scanned text" style sections are open across re-renders (toggle doesn't bubble)
   document.addEventListener('toggle', (e) => {
     const d = e.target;
@@ -1472,9 +1496,10 @@
       state.mock = !!cfg.mockMode; state.hasKeys = !!cfg.hasKeys;
     } catch (_) { toast('Cannot reach the server. Please try again.', 'error'); }
     renderApiMode();
-    if (!state.hasKeys && !state.mock) toast('No Lumen API keys found. Switch to Mock Mode to try the flow.', 'warn');
+    if (!state.hasKeys && !state.mock) toast('Live mode is not set up yet. Turn on Mock Mode in Demo tools to try the app.', 'warn');
     await loadRecords();
     setView(location.hash.slice(1) || 'dashboard', { push: false });
+    if (document.documentElement.classList.contains('welcoming')) { const first = $('.profile-btn'); if (first) first.focus({ preventScroll: true }); }
   }
   init();
 })();

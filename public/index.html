@@ -3,28 +3,67 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EasyBo | Your school papers, sorted</title>
-  <meta name="description" content="Scan receipts and school memos, track payments and clearance, and ask questions in Taglish." />
+  <title>EasyBo Student Buddy</title>
+  <meta name="description" content="Wala nang kupas na resibo. Ilagay ang mga resibo at memo mo sa isang safe na lugar, at alamin agad kung ano ang dapat mong gawin." />
+  <meta name="theme-color" content="#FBF7EF" />
+  <link rel="icon" type="image/svg+xml" href="brand/logo.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
   <script>
-    // Apply saved theme before paint to avoid a flash
+    // Apply saved theme and the welcome screen before first paint (no flash)
     (function () {
       var t = localStorage.getItem('easybo.theme');
       if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+      if (!sessionStorage.getItem('easybo.in')) document.documentElement.classList.add('welcoming');
     })();
   </script>
 </head>
 <body>
   <a class="skip-link" href="#viewRoot">Skip to content</a>
 
+  <!-- Welcome: demo profiles, no password -->
+  <section class="welcome" id="welcome" aria-labelledby="welcomeTitle">
+    <div class="welcome-card receipt">
+      <svg class="logo-svg welcome-logo" viewBox="4 -1 32 46" width="64" height="92" role="img" aria-label="EasyBo logo">
+        <path class="logo-body" d="M8 1H32A2 2 0 0 1 34 3V43L30.5 40L27 43L23.5 40L20 43L16.5 40L13 43L9.5 40L6 43V3A2 2 0 0 1 8 1Z" />
+        <path class="logo-rule" d="M12 8H28M12 12.5H22" fill="none" />
+        <path class="logo-check" d="M12.5 24L18 29.5L28 17" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <h1 id="welcomeTitle" class="welcome-title">EasyBo</h1>
+      <p class="welcome-sub-brand">Student Buddy</p>
+      <p class="welcome-tag">Wala nang kupas na resibo.</p>
+      <p class="welcome-sub">Ilagay ang mga resibo at memo mo sa isang safe na lugar, at alamin agad kung ano ang dapat mong gawin.</p>
+      <div class="welcome-profiles">
+        <button class="profile-btn" type="button" data-action="enter" data-student="2026-00142">
+          <span class="avatar" aria-hidden="true">J</span>
+          <span><strong>Continue as Juan</strong><small>BSIT 1-A · demo profile</small></span>
+        </button>
+        <button class="profile-btn" type="button" data-action="enter" data-student="2026-00891">
+          <span class="avatar" aria-hidden="true">M</span>
+          <span><strong>Continue as Maria</strong><small>BSCS 2-B · demo profile</small></span>
+        </button>
+      </div>
+      <p class="welcome-note">Demo profiles lang ito. Walang password.</p>
+    </div>
+    <footer class="welcome-foot">
+      <span class="plp-badge">PLP</span>
+      <span>Para sa mga estudyante ng PLP</span>
+      <span class="sdg-chip">SDG 4</span><span class="sdg-chip">SDG 10</span>
+      <span>Quality Education at Reduced Inequalities</span>
+    </footer>
+  </section>
+
   <div class="app">
-    <!-- Sidebar (desktop) -->
+    <!-- Sidebar (tablet and desktop) -->
     <aside class="sidebar" id="sidebar" aria-label="Primary">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">EB</div>
+        <svg class="logo-svg" viewBox="4 -1 32 46" width="32" height="46" role="img" aria-label="EasyBo logo">
+          <path class="logo-body" d="M8 1H32A2 2 0 0 1 34 3V43L30.5 40L27 43L23.5 40L20 43L16.5 40L13 43L9.5 40L6 43V3A2 2 0 0 1 8 1Z" />
+          <path class="logo-rule" d="M12 8H28M12 12.5H22" fill="none" />
+          <path class="logo-check" d="M12.5 24L18 29.5L28 17" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
         <div>
           <div class="brand-name">EasyBo</div>
           <div class="brand-sub">Student Buddy</div>
@@ -39,15 +78,7 @@
         <a href="#buddy" class="nav-item" data-view="buddy"><i data-lucide="message-circle"></i><span>Ask EasyBo</span></a>
       </nav>
 
-      <div class="partner-badge" aria-label="Pilot partner and Sustainable Development Goals">
-        <p class="pb-label">Pilot partner</p>
-        <p class="pb-name">PLP Student Affairs</p>
-        <div class="pb-sdgs">
-          <span class="sdg sdg4">SDG 4</span>
-          <span class="sdg sdg10">SDG 10</span>
-        </div>
-        <p class="pb-desc">Quality Education and Reduced Inequalities</p>
-      </div>
+      <p class="sidebar-note">Wala nang kupas na resibo.</p>
     </aside>
 
     <div class="shell">
@@ -79,9 +110,6 @@
                 <button class="btn btn-ghost btn-danger-text" data-action="reset-demo" type="button"><i data-lucide="rotate-ccw"></i>Reset Demo</button>
                 <button class="btn btn-ghost" id="themeBtn" data-action="toggle-theme" type="button"><i data-lucide="moon"></i><span>Dark theme</span></button>
               </div>
-
-              <hr class="divider" />
-              <p class="pop-hint">Pilot partner: PLP Student Affairs<br />UN SDG 4 and SDG 10</p>
             </div>
           </div>
         </div>
