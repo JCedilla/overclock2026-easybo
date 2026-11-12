@@ -13,7 +13,7 @@ Every semester, students juggle official receipts, statements of account, cleara
 This hits hardest for first-year and working students who don't yet know how school offices work.
 
 - **Who it's for:** college students in the Philippines, especially first-years.
-- **Partner who could use it:** _TODO: name a real partner (for example, a school's Office of Student Affairs or Registrar)._
+- **Partner/s who could use it:** School's Office of Student Affairs/Student Success Office, Registrars
 
 ## The solution
 
