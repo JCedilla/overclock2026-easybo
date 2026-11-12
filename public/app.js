@@ -27,6 +27,7 @@
     file: null, previewUrl: '', previewType: '', fileName: '',
     processing: false, stage: 'reading', error: '',
     docId: null, text: '', corrections: {}, editWord: null, showText: false,
+    words: [], tokenMap: null, manual: false, attach: null, attachPromise: null, offline: false,
     fields: { title: '', category: CATEGORIES[1], referenceNo: '', amountPaid: 0, balanceDue: 0, deadline: '', summary: '', studyNotes: [] },
     uncertain: {}, confirmed: {}, checklist: []
   });
@@ -54,7 +55,11 @@
   const student = () => STUDENTS.find((s) => s.id === state.studentId) || STUDENTS[0];
   const icons = () => { if (window.lucide) window.lucide.createIcons({ attrs: { 'stroke-width': 1.75 } }); };
   const uid = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const isoDay = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return d.toISOString().slice(0, 10); };
+  // Local calendar date as YYYY-MM-DD (toISOString would give the UTC date, a day off before 8am in PH)
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const localIso = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const isoDay = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return localIso(d); };
+  const todayLabel = () => new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
 
   function parseDay(v) {
     if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
@@ -130,33 +135,52 @@
   const closeModal = () => { $('#modalRoot').innerHTML = ''; };
 
   // ───────── Persistence (server first, localStorage fallback) ─────────
+  // Every change is cached on this device first. If the server write fails, the student is marked
+  // "unsynced"; on the next load the device copy wins and is pushed to the server, so nothing is lost.
   const lsKey = () => `easybo.records.${state.studentId}`;
-  function cacheLocal() { try { localStorage.setItem(lsKey(), JSON.stringify(state.records)); } catch (_) { /* quota */ } }
+  const dirtyKey = () => `easybo.unsynced.${state.studentId}`;
+  const OFFLINE_MSG = 'Naka-save sa device na ito. Isi-sync namin pagbalik ng connection.';
+  function cacheLocal() {
+    try { localStorage.setItem(lsKey(), JSON.stringify(state.records)); return true; }
+    catch (_) {
+      // Storage full: keep the records, drop inline photos from the device copy
+      try { localStorage.setItem(lsKey(), JSON.stringify(state.records.map((r) => (/^data:/.test(r.image || '') ? { ...r, image: '' } : r)))); return true; }
+      catch (__) { return false; }
+    }
+  }
   function readLocal() { try { return JSON.parse(localStorage.getItem(lsKey()) || '[]'); } catch (_) { return []; } }
+  function setDirty(on) { try { if (on) localStorage.setItem(dirtyKey(), '1'); else localStorage.removeItem(dirtyKey()); } catch (_) { /* ignore */ } }
+  function isDirty() { try { return localStorage.getItem(dirtyKey()) === '1'; } catch (_) { return false; } }
+  const putAll = () => api('/api/records', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: state.studentId, records: state.records }) });
 
   async function loadRecords() {
+    if (isDirty()) {
+      state.records = readLocal();
+      try { await putAll(); setDirty(false); toast('Na-sync na ang mga na-save mo habang offline.'); }
+      catch (_) { toast('Offline pa rin. Nandito pa rin sa device na ito ang mga documents mo.', 'warn'); }
+      return;
+    }
     try {
       const data = await api(`/api/records?studentId=${encodeURIComponent(state.studentId)}`);
       state.records = Array.isArray(data.records) ? data.records : [];
       cacheLocal();
     } catch (_) {
       state.records = readLocal();
-      toast('Server unreachable. Showing records saved on this device.', 'warn');
+      toast('Hindi ma-reach ang server. Ipinapakita ang mga naka-save sa device na ito.', 'warn');
     }
   }
-  async function syncRecords() {
+  // Returns true when the server has the change.
+  async function syncRecords({ quiet = false } = {}) {
     cacheLocal();
-    try {
-      await api('/api/records', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: state.studentId, records: state.records }) });
-    } catch (_) {
-      toast('Saved on this device only. Server sync failed.', 'warn');
-    }
+    try { await putAll(); setDirty(false); return true; }
+    catch (_) { setDirty(true); if (!quiet) toast(OFFLINE_MSG, 'warn'); return false; }
   }
-  async function addRecord(record) {
+  async function addRecord(record, { quiet = false } = {}) {
     state.records.unshift(record);
+    if (isDirty()) return syncRecords({ quiet }); // device copy is ahead of the server: push everything
     cacheLocal();
-    try { await postJson('/api/records', { studentId: state.studentId, record }); }
-    catch (_) { toast('Saved on this device only. Server sync failed.', 'warn'); }
+    try { await postJson('/api/records', { studentId: state.studentId, record }); return true; }
+    catch (_) { setDirty(true); if (!quiet) toast(OFFLINE_MSG, 'warn'); return false; }
   }
 
   // ───────── Derived data ─────────
@@ -174,13 +198,16 @@
   }
   // Scholarship amounts are credits to the student, not payments made by the student.
   const isCredit = (r) => r.category === 'Scholarship';
+  // amountPaid is what the scanned paper says and never changes. Later payments are kept as their own entries.
+  const paymentsOf = (r) => (Array.isArray(r.payments) ? r.payments : []);
+  const paidTotal = (r) => (Number(r.amountPaid) || 0) + paymentsOf(r).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   function stats() {
     const tasks = allTasks();
     const done = tasks.filter((t) => t.done).length;
     const due = state.records.filter((r) => Number(r.balanceDue) > 0 && parseDay(r.deadline)).sort(sortByDeadline)[0];
     return {
       total: state.records.length,
-      paid: state.records.reduce((s, r) => s + (isCredit(r) ? 0 : Number(r.amountPaid) || 0), 0),
+      paid: state.records.reduce((s, r) => s + (isCredit(r) ? 0 : paidTotal(r)), 0),
       balance: state.records.reduce((s, r) => s + (Number(r.balanceDue) || 0), 0),
       nextDue: due ? due.deadline : null,
       tasks: tasks.length, done, pending: tasks.length - done,
@@ -388,8 +415,11 @@
     if (!task) return;
     task.done = true;
     if (paid && Number(rec.balanceDue) > 0) {
-      rec.amountPaid = (Number(rec.amountPaid) || 0) + Number(rec.balanceDue);
+      // Record the payment as its own entry; the receipt's own amount stays as scanned.
+      const payment = { id: uid('pay'), amount: Number(rec.balanceDue), date: localIso(), note: 'Balance paid' };
+      rec.payments = [...paymentsOf(rec), payment];
       rec.balanceDue = 0;
+      task.paymentId = payment.id;
     }
     renderView();
     await syncRecords();
@@ -445,8 +475,89 @@
             <li><i data-lucide="scan"></i><span>Fit the whole paper in the photo, with all four corners showing.</span></li>
           </ul>
         </div>
+        <div class="card sample-card">
+          <h2 class="card-title">Walang papel ngayon?</h2>
+          <p class="card-sub">Subukan ang isang sample para makita kung paano gumagana ang EasyBo.${state.mock ? '' : ' <strong>Live mode is on, so a sample uses Lumen credits.</strong>'}</p>
+          <div class="sample-row">
+            ${Object.entries(SAMPLES).map(([k, s]) => `<button class="btn btn-ghost" data-action="try-sample" data-sample="${k}" type="button"><i data-lucide="${s.icon}"></i>${esc(s.label)}</button>`).join('')}
+          </div>
+        </div>
         <div class="center"><button class="link-btn" data-action="skip-upload" type="button">No file? Type the details yourself</button></div>
       </div>`;
+  }
+
+  // Sample papers drawn on a canvas, so the demo shows a real-looking photo and runs the real flow.
+  // In Mock Mode the server returns matching text for these file names.
+  const SAMPLES = {
+    receipt: { label: 'Sample receipt', icon: 'receipt', file: 'sample-receipt.png', sub: 'OFFICE OF THE UNIVERSITY REGISTRAR & CASHIER', title: 'OFFICIAL RECEIPT', stamp: 'PAID',
+      lines: ['Document Ref: OR-2026-99412', 'Date: November 12, 2026', 'Particulars: Computer Lab & miscellaneous deposit', 'Amount Paid: PHP 1,250.00', 'Remaining Balance Due: PHP 500.00', 'Submission Deadline: November 24, 2026', '', 'REQUIREMENTS FOR FINAL EXAM PERMIT:', '1. Signed Library & Computer Lab Clearance Slip', '2. Official Receipt (OR-2026-99412) photocopy', '3. Updated Certificate of Registration (COR) with Adviser Signature'] },
+    memo: { label: 'Clearance memo', icon: 'clipboard-check', file: 'sample-clearance-memo.png', sub: 'OFFICE OF THE UNIVERSITY REGISTRAR', title: 'MEMORANDUM',
+      lines: ['Memo No.: REG-MEMO-114', 'Date: November 10, 2026', 'SUBJECT: FINAL EXAM PERMIT AND CLEARANCE REQUIREMENTS', 'To: All 1st Semester Students', '', 'Please complete the following before exam week:', '1. Signed Library & Computer Lab Clearance Slip', '2. Updated Certificate of Registration (COR) with Adviser Signature', "3. Submit all papers to the Registrar's Office", '', 'Deadline: November 20, 2026'] },
+    scholarship: { label: 'Scholarship notice', icon: 'award', file: 'sample-scholarship.png', sub: 'OFFICE OF STUDENT AFFAIRS AND SCHOLARSHIPS', title: 'NOTICE OF SCHOLARSHIP AWARD',
+      lines: ['Reference: SCH-2026-031', 'Date: November 3, 2026', 'SUBJECT: ACADEMIC EXCELLENCE SCHOLARSHIP, 1ST SEMESTER', 'Scholarship Amount Credited: PHP 5,000.00', '', 'To keep your scholarship:', '1. Submit the scholarship renewal form', '2. Maintain the required General Weighted Average (GWA)', '', 'Deadline: November 30, 2026'] }
+  };
+  function wrapLine(line, max) {
+    if (line.length <= max) return [line];
+    const out = []; let cur = '';
+    line.split(' ').forEach((w) => { if ((cur + ' ' + w).trim().length > max) { out.push(cur); cur = '   ' + w; } else cur = (cur + ' ' + w).trim() === '' ? w : (cur ? cur + ' ' + w : w); });
+    if (cur) out.push(cur);
+    return out;
+  }
+  function sampleFile(key) {
+    const s = SAMPLES[key];
+    const W = 820, pad = 56, lh = 34;
+    const lines = s.lines.flatMap((l) => wrapLine(l, 50));
+    const H = pad * 2 + 150 + lines.length * lh + 40;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#FDFBF6'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#D9CFBA'; g.lineWidth = 2; g.strokeRect(14, 14, W - 28, H - 28);
+    g.fillStyle = '#1B2A41'; g.textAlign = 'center';
+    g.font = '700 32px Georgia, serif'; g.fillText('SAMPLE STATE UNIVERSITY', W / 2, pad + 14);
+    g.font = '600 18px Arial, sans-serif'; g.fillText(s.sub, W / 2, pad + 46);
+    g.font = '800 24px Arial, sans-serif'; g.fillText(s.title, W / 2, pad + 92);
+    g.setLineDash([8, 6]); g.beginPath(); g.moveTo(pad, pad + 112); g.lineTo(W - pad, pad + 112); g.stroke(); g.setLineDash([]);
+    g.textAlign = 'left'; g.fillStyle = '#222'; g.font = '22px "Courier New", monospace';
+    lines.forEach((l, i) => g.fillText(l, pad, pad + 156 + i * lh));
+    if (s.stamp) {
+      g.save(); g.translate(W - 170, pad + 250); g.rotate(-0.14);
+      g.strokeStyle = 'rgba(185,28,28,.85)'; g.fillStyle = 'rgba(185,28,28,.85)'; g.lineWidth = 4;
+      g.strokeRect(-86, -36, 172, 62); g.strokeRect(-80, -30, 160, 50);
+      g.font = '800 32px Arial, sans-serif'; g.textAlign = 'center'; g.fillText(s.stamp, 0, 6); g.restore();
+    }
+    return new Promise((res) => c.toBlob((b) => res(new File([b], s.file, { type: 'image/png' })), 'image/png'));
+  }
+
+  // A small copy of the original paper to keep with the record (images are shrunk; small PDFs kept as-is)
+  async function makeAttachment(file) {
+    if (/^image\/(png|jpeg|webp)$/.test(file.type) && window.createImageBitmap) {
+      const bmp = await createImageBitmap(file);
+      const s = Math.min(1, 1100 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(bmp.width * s)); c.height = Math.max(1, Math.round(bmp.height * s));
+      const g = c.getContext('2d'); g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(bmp, 0, 0, c.width, c.height); if (bmp.close) bmp.close();
+      return { dataUrl: c.toDataURL('image/jpeg', 0.72), kind: 'image' };
+    }
+    if (file.type === 'application/pdf' && file.size <= 3 * 1024 * 1024) {
+      const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+      return { dataUrl, kind: 'pdf' };
+    }
+    return null;
+  }
+
+  // Line up the words in the scanned text with the word list Lumen returned, so a fix is sent
+  // for the right page and word position. Without a word list, the token position is used.
+  function buildTokenMap(text, words) {
+    if (!Array.isArray(words) || !words.length) return null;
+    const toks = text.match(/\S+/g) || [];
+    const map = []; let j = 0;
+    for (let i = 0; i < toks.length && j < words.length; i++) {
+      let k = j; const limit = Math.min(words.length, j + 8);
+      while (k < limit && String(words[k].text || '').trim() !== toks[i]) k++;
+      if (k < limit) { map[i] = words[k]; j = k + 1; }
+    }
+    return map;
   }
 
   // ── Step 2: Check ──
@@ -492,6 +603,7 @@
     return `
       <div class="split">${left}
         <div class="stack">
+          ${dupHtml()}
           ${bannerHtml()}
           <div class="card">
             <div class="form-grid two">
@@ -523,23 +635,44 @@
     const flagged = isFlagged(name);
     return `
       <div class="field ${span} ${flagged ? 'flag' : ''}" data-wrap="${name}">
-        <div class="field-top"><label for="f_${name}">${label}</label><span class="flag-tag" ${flagged ? '' : 'hidden'}><i data-lucide="alert-triangle"></i>Pakicheck</span></div>
+        <div class="field-top"><label for="f_${name}">${label}</label><span class="flag-group" ${flagged ? '' : 'hidden'}><span class="flag-tag"><i data-lucide="alert-triangle"></i>Pakicheck</span>${name === 'title' ? '' : `<button type="button" class="flag-ok" data-action="confirm-field" data-field="${name}">Tama ito</button>`}</span></div>
         ${control}
       </div>`;
   }
 
   // A field is amber when it is empty, or the scanner looked unsure and the student has not touched it yet.
+  // The student clears a flag by fixing the value or by pressing "Tama ito". A title is always required.
+  // Typed-in documents (no scan) only need a title.
   function isFlagged(name) {
     const sc = state.scan;
-    if (String(sc.fields[name] ?? '').trim() === '') return true;
-    return !!sc.uncertain[name] && !sc.confirmed[name];
+    const empty = String(sc.fields[name] ?? '').trim() === '';
+    if (name === 'title') return empty;
+    if (sc.manual) return false;
+    if (sc.confirmed[name]) return false;
+    return empty || !!sc.uncertain[name];
   }
   const flaggedCount = () => FIELD_NAMES.filter(isFlagged).length;
   function bannerHtml() {
     const n = flaggedCount();
     return n
-      ? `<div class="banner warn" id="flagBanner" role="status"><i data-lucide="alert-triangle"></i><div><strong>Pakicheck muna bago i-save.</strong><div>${n} ${n === 1 ? 'field ang' : 'fields ang'} may tatak na Pakicheck.</div></div></div>`
+      ? `<div class="banner warn" id="flagBanner" role="status"><i data-lucide="alert-triangle"></i><div><strong>Pakicheck muna bago i-save.</strong><div>${n} ${n === 1 ? 'field ang' : 'fields ang'} may tatak na Pakicheck. Ayusin, o pindutin ang “Tama ito” kung tama na.</div></div></div>`
       : `<div class="banner ok" id="flagBanner" role="status"><i data-lucide="check-circle-2"></i><div><strong>Kumpleto na lahat!</strong><div>Tingnan lang ulit bago i-save.</div></div></div>`;
+  }
+
+  // ── Scanned-before check (same reference number, or same file and title) ──
+  const canonRef = (s) => String(s || '').toUpperCase().replace(/\s+/g, '').replace(/(?<=\d)O|O(?=\d)/g, '0');
+  function findDuplicate(f, fileName) {
+    const ref = canonRef(f.referenceNo);
+    const usable = ref && !/^(N\/A|NOTE|NONE)$/.test(ref);
+    return state.records.find((r) =>
+      (usable && canonRef(r.referenceNo) === ref) ||
+      (fileName && r.fileName === fileName && String(r.title).trim().toLowerCase() === String(f.title).trim().toLowerCase())) || null;
+  }
+  function dupHtml() {
+    const sc = state.scan;
+    const d = findDuplicate(sc.fields, sc.manual ? '' : sc.fileName);
+    if (!d) return '<div id="dupBanner" hidden></div>';
+    return `<div class="banner warn" id="dupBanner" role="status"><i data-lucide="copy"></i><div><strong>Mukhang na-save mo na ito.</strong><div>“${esc(d.title)}” (${esc(d.referenceNo)}) ay nasa My Documents na mula ${esc(d.createdAt || 'dati')}. Kung i-save ulit, madodoble ang bayad at balance.</div><button class="link-btn" data-action="open-record" data-id="${esc(d.id)}" type="button">View the saved copy</button></div></div>`;
   }
   function refreshFlags() {
     FIELD_NAMES.forEach((n) => {
@@ -547,10 +680,13 @@
       if (!w) return;
       const on = isFlagged(n);
       w.classList.toggle('flag', on);
-      const tag = $('.flag-tag', w); if (tag) tag.hidden = !on;
+      const g = $('.flag-group', w); if (g) g.hidden = !on;
     });
     const b = $('#flagBanner');
-    if (b) { b.outerHTML = bannerHtml(); icons(); }
+    if (b) b.outerHTML = bannerHtml();
+    const d = $('#dupBanner');
+    if (d) d.outerHTML = dupHtml();
+    icons();
   }
   function syncFieldInputs() {
     FIELD_NAMES.forEach((n) => { const el = $(`#f_${n}`); if (el && el !== document.activeElement) el.value = state.scan.fields[n]; });
@@ -648,7 +784,11 @@
     if (text === ed.original) { sc.editWord = null; refreshWords(); return; }
     ed.busy = true; ed.text = text; refreshWords();
     try {
-      await postJson('/api/ocr/correct', { documentId: sc.docId || 'mock-doc', pageNumber: 1, wordIndex: ed.index, text });
+      // Send the fix to the scanner only when we know which word it is; otherwise keep it in EasyBo only.
+      const w = sc.tokenMap ? sc.tokenMap[ed.index] : null;
+      if (!sc.tokenMap || w) {
+        await postJson('/api/ocr/correct', { documentId: sc.docId || 'mock-doc', pageNumber: w ? Number(w.pageNumber) || 1 : 1, wordIndex: w ? Number(w.wordIndex) : ed.index, text });
+      }
       sc.text = replaceToken(sc.text, ed.index, text);
       sc.corrections[ed.index] = text;
       applyCorrectionToFields(ed.original, text);
@@ -684,6 +824,7 @@
       </li>`).join('');
     return `
       <div class="stack scan-narrow wide">
+        ${dupHtml()}
         <section class="card" aria-labelledby="sumTitle">
           <p class="eyebrow">Summary</p>
           <h2 id="sumTitle" class="next-title" style="max-width:none">${esc(f.title)}</h2>
@@ -718,7 +859,8 @@
       <div class="scan-narrow">
         <section class="card next-card caught-up" aria-labelledby="doneTitle">
           <p class="eyebrow"><i data-lucide="check-circle-2" style="vertical-align:-3px"></i> Saved</p>
-          <h2 id="doneTitle" class="next-title">Naka-save na! Safe na ang resibo mo.</h2>
+          <h2 id="doneTitle" class="next-title">${sc.offline ? 'Naka-save sa device na ito.' : 'Naka-save na! Safe na ang resibo mo.'}</h2>
+          ${sc.offline ? '<p class="next-from">Offline ang server ngayon. Isi-sync namin ito pagbalik ng connection.</p>' : ''}
           <p class="next-from">${n ? `Idinagdag namin ang ${n} ${n === 1 ? 'step' : 'steps'} sa Clearance &amp; Payments.` : `${esc(sc.savedTitle)} ay nasa My Documents na.`}</p>
           <div class="next-actions">
             <button class="btn btn-primary btn-lg" data-action="scan-another" type="button"><i data-lucide="scan-line"></i>Scan another</button>
@@ -740,6 +882,7 @@
     resetScan();
     const sc = state.scan;
     sc.file = file; sc.fileName = file.name; sc.previewType = type; sc.previewUrl = URL.createObjectURL(file);
+    sc.attachPromise = makeAttachment(file).then((a) => { sc.attach = a; return a; }).catch(() => null);
     if (state.view !== 'scanner') setView('scanner'); // dropped on the Home quick-scan card
     processFile();
   }
@@ -758,6 +901,8 @@
       const t = String(data.extractedText || '');
       sc.text = /^\(OCR completed, but no text/i.test(t) ? '' : t;
       sc.corrections = {};
+      sc.words = Array.isArray(data.words) && data.words.length ? data.words : (Array.isArray(data.wordsSample) ? data.wordsSample : []);
+      sc.tokenMap = buildTokenMap(sc.text, sc.words);
     } catch (e) {
       sc.processing = false; sc.error = e.message; renderView(); return;
     }
@@ -773,7 +918,7 @@
     const stem = sc.fileName.replace(/\.[^.]+$/, '');
     if (!sc.text.trim()) { applyStructured({ title: stem }, ''); return; }
     try {
-      const data = await postJson('/api/chat/organize', { verifiedText: sc.text, fileName: sc.fileName || 'Student Document' });
+      const data = await postJson('/api/chat/organize', { verifiedText: sc.text, fileName: sc.fileName || 'Student Document', studentId: state.studentId });
       applyStructured(data.structured || {}, sc.text);
       if (!sc.fields.title) sc.fields.title = stem;
     } catch (e) {
@@ -782,9 +927,17 @@
     }
   }
 
+  // Nothing is saved while a field is still marked "Pakicheck": the student fixes it or confirms it.
   function goToStep3() {
     const sc = state.scan;
-    if (!String(sc.fields.title).trim()) { toast('Please add a title first.', 'warn'); const t = $('#f_title'); if (t) t.focus(); return; }
+    const flagged = FIELD_NAMES.filter(isFlagged);
+    if (flagged.length) {
+      const first = flagged[0];
+      toast(first === 'title' ? 'Lagyan muna ng title ang document.' : `Pakicheck muna ang ${flagged.length} ${flagged.length === 1 ? 'field' : 'fields'}: ayusin, o pindutin ang “Tama ito”.`, 'warn');
+      const w = $(`[data-wrap="${first}"]`);
+      if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); const inp = $('input, select', w); if (inp) inp.focus({ preventScroll: true }); }
+      return;
+    }
     sc.step = 3; renderView(); window.scrollTo({ top: 0 });
   }
 
@@ -808,13 +961,21 @@
       rawText: sc.text.trim(),
       fileName: sc.fileName,
       verified: true,
-      createdAt: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+      corrections: Object.keys(sc.corrections).length,
+      createdAt: todayLabel(),
       tasks: sc.checklist.map((c) => c.text.trim()).filter(Boolean).map((text, i) => ({ id: `t-${stamp}-${i}`, text, done: false }))
     };
-    await addRecord(record);
-    sc.saving = false; sc.saved = true; sc.savedId = record.id; sc.savedTitle = record.title;
+    // Keep the original paper with the record. Stored as a file on the server; inline if the server is unreachable.
+    const att = sc.attach || (sc.attachPromise ? await sc.attachPromise : null);
+    if (att) {
+      record.imageKind = att.kind;
+      try { record.image = (await postJson('/api/images', { dataUrl: att.dataUrl })).url; }
+      catch (_) { record.image = att.dataUrl; }
+    }
+    const ok = await addRecord(record, { quiet: true });
+    sc.saving = false; sc.saved = true; sc.savedId = record.id; sc.savedTitle = record.title; sc.offline = !ok;
     renderView(); window.scrollTo({ top: 0 });
-    toast('Naka-save na! Safe na ang resibo mo.', 'ok', { label: 'View document', fn: () => viewSaved(record.id) });
+    toast(ok ? 'Naka-save na! Safe na ang resibo mo.' : OFFLINE_MSG, ok ? 'ok' : 'warn', { label: 'View document', fn: () => viewSaved(record.id) });
   }
   function viewSaved(id) { setView('vault'); openRecord(id); }
 
@@ -827,7 +988,11 @@
     const q = state.vaultQ.trim().toLowerCase();
     return state.records.filter((r) => {
       if (state.vaultCat !== 'ALL' && DOC_GROUP[r.category] !== state.vaultCat) return false;
-      return !q || [r.title, r.referenceNo, r.summary, r.category].some((x) => String(x || '').toLowerCase().includes(q));
+      if (!q) return true;
+      const digits = q.replace(/[₱,\s]/g, '');
+      const amounts = [paidTotal(r), Number(r.balanceDue) || 0, Number(r.amountPaid) || 0].filter((n) => n > 0).map(String);
+      return [r.title, r.referenceNo, r.summary, r.category, r.createdAt, fmtDay(r.deadline), r.fileName].some((x) => String(x || '').toLowerCase().includes(q))
+        || (/^\d+(\.\d+)?$/.test(digits) && amounts.some((a) => a.includes(digits)));
     });
   }
 
@@ -840,7 +1005,7 @@
     if ((owing || open) && m && m.days < 0) return { icon: 'alert-circle', tone: 'overdue', stamp: 'Overdue' };
     if (owing) return { icon: 'clock', tone: 'due', stamp: 'May balance' };
     if (open) return { icon: 'clock', tone: 'due', stamp: 'May gagawin' };
-    if (Number(r.amountPaid) > 0) return { icon: 'check', tone: 'paid', stamp: isCredit(r) ? 'Credited' : 'Paid' };
+    if (paidTotal(r) > 0) return { icon: 'check', tone: 'paid', stamp: isCredit(r) ? 'Credited' : 'Paid' };
     return tasks.length ? { icon: 'check', tone: 'paid', stamp: 'Tapos na' } : { icon: 'check', tone: 'neutral', stamp: 'Naka-save' };
   }
   // Stamp chip: bordered, uppercase, tilted. Color + icon + word, as the UX rules require.
@@ -848,7 +1013,7 @@
 
   function recordCard(r) {
     const st = docStatus(r);
-    const paid = Number(r.amountPaid) || 0, due = Number(r.balanceDue) || 0;
+    const paid = paidTotal(r), due = Number(r.balanceDue) || 0;
     const amount = paid > 0 ? `${pesoTile(paid)} <small>${isCredit(r) ? 'credited' : 'paid'}</small>` : due > 0 ? `${pesoTile(due)} <small>to pay</small>` : '';
     return `
       <button class="rec-card doc-card" data-action="open-record" data-id="${esc(r.id)}" type="button">
@@ -936,6 +1101,8 @@
           <div class="menu-wrap">
             <button class="icon-btn" data-action="toggle-menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions"><i data-lucide="ellipsis-vertical"></i></button>
             <div class="menu" role="menu" hidden>
+              <button role="menuitem" class="menu-item" data-action="edit-doc" type="button"><i data-lucide="pencil"></i>Edit details</button>
+              ${m ? '<button role="menuitem" class="menu-item" data-action="calendar-doc" type="button"><i data-lucide="calendar-plus"></i>Add deadline to calendar</button>' : ''}
               <button role="menuitem" class="menu-item" data-action="print-doc" type="button"><i data-lucide="printer"></i>Print</button>
               <button role="menuitem" class="menu-item" data-action="download-doc" type="button"><i data-lucide="download"></i>Download</button>
               <hr class="menu-sep" />
@@ -946,11 +1113,17 @@
         </div>
       </div>
       <div class="drawer-body">
+        ${photoHtml(r)}
         <dl class="summary-grid three">
-          <div><dt>${isCredit(r) ? 'Amount credited' : 'Amount paid'}</dt><dd>${peso(r.amountPaid)}</dd></div>
+          <div><dt>${isCredit(r) ? 'Amount credited' : 'Amount paid'}</dt><dd>${peso(paidTotal(r))}</dd></div>
           <div><dt>Balance due</dt><dd>${peso(r.balanceDue)}</dd></div>
           <div><dt>Deadline</dt><dd>${esc(fmtDay(r.deadline))}</dd>${m ? `<div style="margin-top:6px">${dueBadge(m)}</div>` : ''}</div>
         </dl>
+        ${paymentsOf(r).length ? `<h3 class="drawer-h">Payment history</h3>
+          <ul class="pay-list">
+            <li><span>${esc(r.createdAt || 'On this receipt')}</span><span>On this receipt</span><strong>${peso(r.amountPaid)}</strong></li>
+            ${paymentsOf(r).map((p) => `<li><span>${esc(fmtDay(p.date))}</span><span>${esc(p.note || 'Payment')}</span><strong>${peso(p.amount)}</strong></li>`).join('')}
+          </ul>` : ''}
         ${r.summary ? `<h3 class="drawer-h">What this means</h3><p class="drawer-p">${richText(r.summary)}</p>` : ''}
         ${(r.studyNotes || []).length ? `<h3 class="drawer-h">Key notes</h3><ul class="note-list">${r.studyNotes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
         ${tasks.length ? `<h3 class="drawer-h">Checklist</h3>${tasks.map((t) => taskRow({ ...t, recordId: r.id, recordTitle: '', deadline: null })).join('')}` : ''}
@@ -959,6 +1132,83 @@
     icons();
     const nb = $('.drawer-body', panel); if (nb) nb.scrollTop = top;
   }
+  // The original paper, kept with the record so the student can compare it with what was read
+  function photoHtml(r) {
+    if (!r.image) return '';
+    if (r.imageKind === 'pdf') {
+      return `<a class="doc-file" href="${esc(r.image)}" target="_blank" rel="noopener"><i data-lucide="file-text"></i><span><strong>Original PDF</strong><small>${esc(r.fileName || 'document.pdf')}</small></span><i data-lucide="external-link"></i></a>`;
+    }
+    return `<figure class="doc-photo"><button type="button" data-action="view-photo" data-id="${esc(r.id)}" aria-label="View the original photo larger"><img src="${esc(r.image)}" alt="Original photo of ${esc(r.title)}" loading="lazy" /></button><figcaption>Original photo · tap to enlarge</figcaption></figure>`;
+  }
+  function viewPhoto(id) {
+    const r = state.records.find((x) => x.id === id); if (!r || !r.image) return;
+    openModal(`
+      <div class="modal-head"><h2 class="modal-title">${esc(r.title)}</h2><button class="icon-btn" data-action="close-modal" type="button" aria-label="Close"><i data-lucide="x"></i></button></div>
+      <img class="photo-full" src="${esc(r.image)}" alt="Original photo of ${esc(r.title)}" />`, true);
+  }
+
+  // Edit a saved document's details
+  function editDoc() {
+    closeMenus();
+    const r = state.records.find((x) => x.id === state.drawerId); if (!r) return;
+    const opts = CATEGORIES.map((c) => `<option ${c === r.category ? 'selected' : ''}>${esc(c)}</option>`).join('');
+    const ref = /^(n\/a|note)$/i.test(r.referenceNo || '') ? '' : r.referenceNo;
+    openModal(`
+      <div class="modal-head"><h2 class="modal-title">Edit details</h2><button class="icon-btn" data-action="close-modal" type="button" aria-label="Close"><i data-lucide="x"></i></button></div>
+      <form id="editForm" class="form-grid two" data-id="${esc(r.id)}">
+        <div class="field span-2"><label for="e_title">Document title</label><input id="e_title" class="input" required maxlength="160" value="${esc(r.title)}" /></div>
+        <div class="field span-2"><label for="e_category">Type</label><select id="e_category" class="select">${opts}</select></div>
+        <div class="field span-2"><label for="e_ref">Reference no.</label><input id="e_ref" class="input ref-input" maxlength="60" value="${esc(ref)}" autocomplete="off" /></div>
+        <div class="field"><label for="e_paid">Amount on this paper (₱)</label><input id="e_paid" class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(Number(r.amountPaid) || 0)}" /></div>
+        <div class="field"><label for="e_due">Balance due (₱)</label><input id="e_due" class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(Number(r.balanceDue) || 0)}" /></div>
+        <div class="field span-2"><label for="e_deadline">Deadline</label><input id="e_deadline" class="input" type="date" value="${esc(parseDay(r.deadline) ? r.deadline : '')}" /></div>
+        <div class="modal-actions span-2"><button class="btn btn-ghost" data-action="close-modal" type="button">Cancel</button><button class="btn btn-primary" type="submit"><i data-lucide="save"></i>Save changes</button></div>
+      </form>`);
+  }
+  async function saveEdit(form) {
+    const r = state.records.find((x) => x.id === form.dataset.id); if (!r) { closeModal(); return; }
+    const title = $('#e_title').value.trim();
+    const paid = Number($('#e_paid').value), due = Number($('#e_due').value);
+    if (!title) { toast('Lagyan muna ng title.', 'warn'); $('#e_title').focus(); return; }
+    if (!(paid >= 0) || !(due >= 0)) { toast('Amounts must be 0 or more.', 'warn'); return; }
+    const before = JSON.stringify(r);
+    Object.assign(r, {
+      title, category: $('#e_category').value, referenceNo: $('#e_ref').value.trim() || 'N/A',
+      amountPaid: paid, balanceDue: due, deadline: parseDay($('#e_deadline').value) ? $('#e_deadline').value : 'None', edited: true
+    });
+    closeModal(); renderView();
+    const ok = await syncRecords({ quiet: true });
+    toast(ok ? 'Na-update na ang details.' : OFFLINE_MSG, ok ? 'ok' : 'warn', {
+      label: 'Undo', fn: async () => { const i = state.records.findIndex((x) => x.id === r.id); if (i >= 0) state.records[i] = JSON.parse(before); renderView(); await syncRecords(); }
+    });
+  }
+
+  // All-day calendar event for the document's deadline (works with Google, Apple and Outlook calendars)
+  function calendarDoc() {
+    closeMenus();
+    const r = state.records.find((x) => x.id === state.drawerId); if (!r || !parseDay(r.deadline)) return;
+    const d = r.deadline.replace(/-/g, '');
+    const next = parseDay(r.deadline); next.setDate(next.getDate() + 1);
+    const icsEsc = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+    const todo = (r.tasks || []).filter((t) => !t.done).map((t) => '- ' + t.text);
+    const desc = [Number(r.balanceDue) > 0 ? `Balance due: ${peso(r.balanceDue)}` : '', ...todo, `Reference: ${r.referenceNo}`].filter(Boolean).join('\n');
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//EasyBo Student Buddy//EN', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT',
+      `UID:${r.id}@easybo`, `DTSTAMP:${now}`, `DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${localIso(next).replace(/-/g, '')}`,
+      `SUMMARY:${icsEsc('Deadline: ' + r.title)}`, `DESCRIPTION:${icsEsc(desc)}`,
+      'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc('Bukas na ang deadline: ' + r.title)}`, 'END:VALARM',
+      'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    downloadBlob(new Blob([ics], { type: 'text/calendar;charset=utf-8' }), safeName(r.title) + '.ics');
+    toast('Calendar file downloaded. Buksan para i-add sa calendar mo.');
+  }
+  const safeName = (s) => String(s).replace(/[^\w\- ]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'document';
+  function downloadBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   const closeMenus = () => $$('.menu').forEach((mn) => { if (!mn.hidden) { mn.hidden = true; const b = $('[data-action="toggle-menu"]', mn.parentElement); if (b) b.setAttribute('aria-expanded', 'false'); } });
 
   function printDoc() {
@@ -973,18 +1223,14 @@
     const lines = [
       r.title, '='.repeat(Math.min(60, r.title.length)), '',
       `Type: ${r.category}`, `Reference no.: ${r.referenceNo}`, `Filed: ${r.createdAt || ''}`,
-      `Amount paid: ${peso(r.amountPaid)}`, `Balance due: ${peso(r.balanceDue)}`, `Deadline: ${fmtDay(r.deadline)}`, ''
+      `Amount on this paper: ${peso(r.amountPaid)}`, `Balance due: ${peso(r.balanceDue)}`, `Deadline: ${fmtDay(r.deadline)}`, ''
     ];
+    if (paymentsOf(r).length) lines.push('Payments made later', ...paymentsOf(r).map((p) => `- ${fmtDay(p.date)}: ${peso(p.amount)} (${p.note || 'payment'})`), '');
     if (r.summary) lines.push('What this means', r.summary, '');
     if ((r.studyNotes || []).length) lines.push('Key notes', ...r.studyNotes.map((n) => `- ${n}`), '');
     if ((r.tasks || []).length) lines.push('Checklist', ...r.tasks.map((t) => `[${t.done ? 'x' : ' '}] ${t.text}`), '');
     if (r.rawText) lines.push('Scanned text', r.rawText);
-    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = (r.title.replace(/[^\w\- ]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'document') + '.txt';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    downloadBlob(new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' }), safeName(r.title) + '.txt');
     toast('Downloaded.');
   }
 
@@ -994,7 +1240,7 @@
     closeMenus();
     openModal(`
       <h2 class="modal-title">Delete this document?</h2>
-      <p class="card-sub" style="margin-top:8px"><strong>${esc(r.title)}</strong> and its checklist will be removed from My Documents. This cannot be undone.</p>
+      <p class="card-sub" style="margin-top:8px"><strong>${esc(r.title)}</strong> and its checklist will be removed from My Documents. You can undo this for a few seconds.</p>
       <div class="modal-actions">
         <button class="btn btn-ghost" data-action="close-modal" type="button">Keep it</button>
         <button class="btn btn-danger" data-action="delete-record" data-id="${esc(id)}" type="button"><i data-lucide="trash-2"></i>Delete</button>
@@ -1028,6 +1274,10 @@
     state.records.forEach((r) => {
       const paid = Number(r.amountPaid) || 0, due = Number(r.balanceDue) || 0;
       if (paid > 0) rows.push({ kind: isCredit(r) ? 'credit' : 'paid', ts: Date.parse(r.createdAt) || 0, date: r.createdAt || '—', amount: paid, rec: r });
+      paymentsOf(r).forEach((p) => {
+        const d = parseDay(p.date);
+        rows.push({ kind: 'payment', ts: d ? d.getTime() : 0, date: d ? fmtDay(p.date) : '—', amount: Number(p.amount) || 0, rec: r });
+      });
       if (due > 0) {
         const d = parseDay(r.deadline);
         rows.push({ kind: 'due', ts: d ? d.getTime() : 0, date: d ? fmtDay(r.deadline) : 'No date yet', amount: due, rec: r, meta: dueMeta(r.deadline) });
@@ -1036,7 +1286,7 @@
     return rows.sort((a, b) => b.ts - a.ts);
   }
   function paymentStatus(row) {
-    if (row.kind === 'paid') return '<span class="badge badge-ok"><i data-lucide="check"></i>Paid</span>';
+    if (row.kind === 'paid' || row.kind === 'payment') return '<span class="badge badge-ok"><i data-lucide="check"></i>Paid</span>';
     if (row.kind === 'credit') return '<span class="badge badge-ok"><i data-lucide="check"></i>Credited</span>';
     const d = row.meta ? row.meta.days : null;
     if (d !== null && d < 0) return '<span class="badge badge-danger"><i data-lucide="alert-circle"></i>Overdue</span>';
@@ -1050,7 +1300,7 @@
     const body = rows.map((row) => `
       <tr>
         <td class="c-date" data-label="Date">${esc(row.date)}</td>
-        <td class="c-desc"><button class="link-btn plain" data-action="open-record" data-id="${esc(row.rec.id)}" type="button">${esc(row.kind === 'due' ? 'Balance for ' + row.rec.title : row.kind === 'credit' ? 'Scholarship credit: ' + row.rec.title : row.rec.title)}</button><div class="ref">${esc(row.rec.referenceNo)}</div></td>
+        <td class="c-desc"><button class="link-btn plain" data-action="open-record" data-id="${esc(row.rec.id)}" type="button">${esc(row.kind === 'due' ? 'Balance for ' + row.rec.title : row.kind === 'credit' ? 'Scholarship credit: ' + row.rec.title : row.kind === 'payment' ? 'Balance payment: ' + row.rec.title : row.rec.title)}</button><div class="ref">${esc(row.rec.referenceNo)}</div></td>
         <td class="c-amt num">${peso(row.amount)}</td>
         <td class="c-status">${paymentStatus(row)}</td>
       </tr>`).join('');
@@ -1083,8 +1333,12 @@
       tasks: all.filter((t) => t.office === o).sort((a, b) => (a.done - b.done) || sortByDeadline(a, b))
     })).filter((g) => g.tasks.length);
     return `
+      <p class="print-only print-head">Clearance checklist · ${esc(student().name)} (${esc(student().program)}) · ${esc(todayLabel())}</p>
       <div class="card" style="margin-bottom:24px">
-        <p class="clear-headline">${headline}</p>
+        <div class="clear-top">
+          <p class="clear-headline">${headline}</p>
+          <button class="btn btn-ghost no-print" data-action="print-clearance" type="button"><i data-lucide="printer"></i>Print checklist</button>
+        </div>
         <div class="progress ${s.pct === 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${s.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Clearance progress"><span style="width:${s.pct}%"></span></div>
       </div>
       <div class="stack">${groups.map((g) => {
@@ -1114,11 +1368,28 @@
   // Order matters: more specific topics are checked first.
   const INTENTS = [
     ['summary', /summar|buod|latest|pinakabago|pinaka-?bago|huling (resibo|receipt)|last receipt/i],
+    ['ref', /\bor\s?(number|no\.?|#)|\bor#|reference|\bref\b|receipt number|resibo number|numero ng resibo/i],
+    ['biggest', /pinakamalaki|pinaka-?malaking|pinakamahal|biggest|largest|highest/i],
+    ['office', /\boffice\b|opisina|pupuntahan|saan (ko|ako|ba)|where (do|should|can) i|which office/i],
     ['clearance', /clearance|requirement|ipasa|isumite|i-?submit|\bsubmit\b|permit|kulang sa|to-?do|checklist|\bano pa\b/i],
     ['deadline', /deadline|due date|\bkailan\b|petsa|hanggang kailan|until when|\bwhen\b/i],
-    ['balance', /balance|babayaran|bayaran|utang|\bowe\b|how much.*(pay|left|remaining)|magkano pa|natitira|remaining/i],
-    ['paid', /nabayaran|bayad na|paid so far|total paid|how much.*paid/i]
+    ['paid', /nabayaran|binayaran|bayad na|paid so far|total paid|how much (did|have) i (paid|pay)|have i paid/i],
+    ['balance', /balance|babayaran|utang|\bowe\b|magkano pa|natitira|remaining|still (need to )?pay|how much.*\b(left|still)\b/i]
   ];
+  // Words in a question that point at a specific document ("lab fee", "COR", "99412")
+  const STOPWORDS = new Set(('ang ng sa ko mo ba na mga para ano anong magkano saan kailan paano lahat at pa po nga yung iyong aking akin '
+    + 'how much what which where when is are my the a an of for to do did have has i me can should office opisina pupuntahan '
+    + 'nabayaran binayaran bayad babayaran balance paid pay owe deadline number reference ref resibo receipt receipts document documents '
+    + 'pinakamalaki pinakamalaking biggest largest highest still left need').split(/\s+/));
+  function questionKeys(q) {
+    return (q.toLowerCase().match(/[a-z0-9ñ][a-z0-9ñ-]{2,}/g) || []).filter((w) => !STOPWORDS.has(w));
+  }
+  function matchRecords(q, list = state.records) {
+    const keys = questionKeys(q);
+    if (!keys.length) return [];
+    return list.filter((r) => { const hay = `${r.title} ${r.referenceNo} ${r.category} ${r.summary || ''}`.toLowerCase(); return keys.some((k) => hay.includes(k)); });
+  }
+  const realRef = (r) => r.referenceNo && !/^(n\/a|note|none)$/i.test(r.referenceNo);
   const bullets = (arr) => arr.map((x) => '• ' + x).join('\n');
   const srcOf = (rs) => rs.map((r) => ({ id: r.id, title: r.title }));
   const needScan = (text) => ({ text, sources: [], action: { label: 'Scan a document', view: 'scanner' } });
@@ -1128,9 +1399,38 @@
     const kind = (INTENTS.find(([, re]) => re.test(q)) || [])[0];
     if (!kind) return null; // open-ended: let the AI handle it
     const recs = state.records;
+    if (kind === 'office' && !recs.length) return needScan('Wala pa akong nakikitang documents mo. Mag-scan ng clearance memo para malaman ko kung saan ka pupunta.');
     if (!recs.length) return needScan('Wala pa akong nakikitang documents mo. Mag-scan ka muna ng resibo o memo, tapos masasagot ko na iyan.');
     const s = stats();
 
+    if (kind === 'ref') {
+      const withRef = recs.filter(realRef);
+      if (!withRef.length) return needScan('Wala pa akong nakikitang OR o reference number. Mag-scan ng resibo para ma-save ko.');
+      const hit = matchRecords(q, withRef);
+      const list = hit.length ? hit : withRef;
+      return { text: `${list.length === 1 ? 'Ito ang reference number:' : 'Ito ang mga reference number mo:'}\n${bullets(list.slice(0, 8).map((r) => `**${r.referenceNo}**: ${r.title}`))}`, sources: srcOf(list.slice(0, 8)) };
+    }
+    if (kind === 'biggest') {
+      const items = [];
+      recs.filter((r) => !isCredit(r)).forEach((r) => {
+        if (Number(r.amountPaid) > 0) items.push({ amount: Number(r.amountPaid), label: r.title, when: r.createdAt, r });
+        paymentsOf(r).forEach((p) => items.push({ amount: Number(p.amount) || 0, label: `Balance payment: ${r.title}`, when: fmtDay(p.date), r }));
+      });
+      if (!items.length) return { text: 'Wala pa akong nakikitang bayad sa mga documents mo.', sources: [] };
+      const top = items.sort((a, b) => b.amount - a.amount)[0];
+      return { text: `Ang pinakamalaki mong bayad ay **${peso(top.amount)}** para sa ${top.label}${top.when ? ` (${top.when})` : ''}.`, sources: srcOf([top.r]) };
+    }
+    if (kind === 'office') {
+      const pend = allTasks().filter((t) => !t.done).map((t) => ({ ...t, office: officeOf(t) }));
+      if (!pend.length) return { text: s.tasks ? 'Wala ka nang kailangang puntahan. Tapos na lahat ng requirements mo!' : 'Wala pa akong nakikitang requirements. Mag-scan ng clearance memo para malaman ko kung saan ka pupunta.', sources: [] };
+      const keys = questionKeys(q);
+      const hit = keys.length ? pend.filter((t) => keys.some((k) => t.text.toLowerCase().includes(k))) : [];
+      if (hit.length) {
+        return { text: hit.map((t) => `Para sa “${t.text}”, pumunta sa **${t.office}**.`).join('\n'), sources: srcOf(recs.filter((r) => hit.some((t) => t.recordId === r.id))) };
+      }
+      const byOffice = OFFICES.map((o) => ({ o, n: pend.filter((t) => t.office === o).length })).filter((g) => g.n);
+      return { text: `Ito ang mga office na kailangan mong puntahan:\n${bullets(byOffice.map((g) => `**${g.o}**: ${g.n} ${g.n === 1 ? 'requirement' : 'requirements'}`))}\n\nTingnan ang Clearance tab para sa buong listahan.`, sources: srcOf(recs.filter((r) => (r.tasks || []).some((t) => !t.done))) };
+    }
     if (kind === 'balance') {
       const owing = recs.filter((r) => Number(r.balanceDue) > 0).sort(sortByDeadline);
       const paidLine = s.paid > 0 ? `\n\nNabayaran mo na ang **${peso(s.paid)}** sa ngayon.` : '';
@@ -1140,9 +1440,14 @@
       return { text: `May **${peso(total)}** ka pang babayaran.\n${bullets(lines)}${paidLine}`, sources: srcOf(owing) };
     }
     if (kind === 'paid') {
-      const paidRecs = recs.filter((r) => !isCredit(r) && Number(r.amountPaid) > 0);
+      const paidRecs = recs.filter((r) => !isCredit(r) && paidTotal(r) > 0);
       if (!paidRecs.length) return { text: 'Wala pa akong nakikitang bayad sa mga documents mo.', sources: [] };
-      return { text: `Nabayaran mo na ang **${peso(s.paid)}** sa kabuuan.\n${bullets(paidRecs.map((r) => `${peso(r.amountPaid)}: ${r.title}`))}`, sources: srcOf(paidRecs) };
+      const hit = matchRecords(q, paidRecs);
+      if (hit.length) {
+        const sum = hit.reduce((t, r) => t + paidTotal(r), 0);
+        return { text: `Para diyan, nakapagbayad ka na ng **${peso(sum)}**.\n${bullets(hit.map((r) => `${peso(paidTotal(r))}: ${r.title}${realRef(r) ? ` (${r.referenceNo})` : ''}`))}`, sources: srcOf(hit) };
+      }
+      return { text: `Nabayaran mo na ang **${peso(s.paid)}** sa kabuuan.\n${bullets(paidRecs.map((r) => `${peso(paidTotal(r))}: ${r.title}`))}`, sources: srcOf(paidRecs) };
     }
     if (kind === 'deadline') {
       const pending = recs.filter((r) => parseDay(r.deadline) && (Number(r.balanceDue) > 0 || (r.tasks || []).some((t) => !t.done))).sort(sortByDeadline);
@@ -1168,7 +1473,7 @@
     const m = dueMeta(r.deadline);
     const lines = [
       `Reference no.: ${r.referenceNo}`,
-      `Binayaran: ${peso(r.amountPaid)}`,
+      `Binayaran: ${peso(paidTotal(r))}${paymentsOf(r).length ? ` (kasama ang ${paymentsOf(r).length} na bayad pagkatapos)` : ''}`,
       Number(r.balanceDue) > 0 ? `Natitirang balance: ${peso(r.balanceDue)}${m ? `, bago mag ${fmtDay(r.deadline)}` : ''}` : 'Walang natitirang balance',
       `Na-file noong ${r.createdAt || 'hindi tiyak ang petsa'}`
     ];
@@ -1180,7 +1485,7 @@
     if (!state.records.length) return '';
     return 'SAVED DOCUMENTS (newest first):\n' + state.records.map((r) => {
       const open = (r.tasks || []).filter((t) => !t.done).map((t) => t.text).join('; ');
-      return `- [${r.category}] ${r.title} (Ref: ${r.referenceNo}, Paid: PHP ${r.amountPaid}, Balance Due: PHP ${r.balanceDue}, Deadline: ${r.deadline}${open ? `, To do: ${open}` : ''}): ${String(r.summary || '').slice(0, 140)}`;
+      return `- [${r.category}] ${r.title} (Ref: ${r.referenceNo}, Paid: PHP ${paidTotal(r)}, Balance Due: PHP ${r.balanceDue}, Deadline: ${r.deadline}${open ? `, To do: ${open}` : ''}): ${String(r.summary || '').slice(0, 140)}`;
     }).join('\n');
   }
   // Which saved documents does the answer actually mention?
@@ -1203,7 +1508,7 @@
         await wait(550); // a short beat so it feels like a conversation
         addMsg({ role: 'bot', ...local });
       } else {
-        const data = await postJson('/api/chat/ask', { question, contextText: buildContext() });
+        const data = await postJson('/api/chat/ask', { question, contextText: buildContext(), studentId: state.studentId });
         const text = String(data.answer || '').trim() || 'Walang sagot na natanggap. Subukan mong itanong sa ibang paraan.';
         addMsg({ role: 'bot', text, sources: aiSources(text), ai: true, mock: !!data.mock });
       }
@@ -1341,14 +1646,11 @@
       case 'mark-done': markTask(el.dataset.rec, el.dataset.task, false); break;
       case 'reset-demo': closeDemo(); confirmReset(); break;
       case 'confirm-reset': resetDemo(); break;
-      case 'toggle-mock': {
-        try {
-          const d = await postJson('/api/config/mock', { mockMode: !state.mock });
-          state.mock = d.mockMode; renderApiMode();
-          toast(state.mock ? 'Mock Mode on. No credits will be used.' : 'Live mode on.', state.mock ? 'warn' : 'ok');
-        } catch (err) { toast(err.message, 'error'); }
+      case 'toggle-mock':
+        // Going Live spends Lumen credits, so it needs a second click. Going back to Mock is instant.
+        if (state.mock) { closeDemo(); confirmLive(); } else setMock(true);
         break;
-      }
+      case 'confirm-live': closeModal(); setMock(false); break;
       case 'enter': enterApp(el.dataset.student); break;
       case 'load-demo': loadDemo(); break;
       case 'quick-note': quickNote(); break;
@@ -1357,14 +1659,35 @@
         const rec = state.records.find((r) => r.id === el.dataset.rec);
         const t = rec?.tasks.find((x) => x.id === el.dataset.task);
         if (t && el.checked && isPaymentTask(t, rec)) { el.checked = false; markTask(rec.id, t.id, true); }
-        else if (t) { t.done = el.checked; await syncRecords(); renderView(); }
+        else if (t) {
+          t.done = el.checked;
+          // Unticking a payment task takes back the payment it created
+          if (!el.checked && t.paymentId) {
+            const p = paymentsOf(rec).find((x) => x.id === t.paymentId);
+            if (p) { rec.balanceDue = (Number(rec.balanceDue) || 0) + Number(p.amount); rec.payments = paymentsOf(rec).filter((x) => x.id !== p.id); }
+            delete t.paymentId;
+          }
+          await syncRecords(); renderView();
+        }
         break;
       }
       case 'open-record': openRecord(el.dataset.id); break;
       case 'confirm-delete': confirmDelete(el.dataset.id); break;
-      case 'delete-record':
-        state.records = state.records.filter((r) => r.id !== el.dataset.id);
-        closeModal(); closeDrawer(); await syncRecords(); toast('Natanggal na ang document.'); renderView(); break;
+      case 'delete-record': deleteRecord(el.dataset.id); break;
+      case 'view-photo': viewPhoto(el.dataset.id); break;
+      case 'edit-doc': editDoc(); break;
+      case 'calendar-doc': calendarDoc(); break;
+      case 'print-clearance': printClearance(); break;
+      case 'confirm-field': {
+        const f = el.dataset.field; state.scan.confirmed[f] = true; refreshFlags();
+        const inp = $(`#f_${f}`); if (inp) inp.focus({ preventScroll: true });
+        break;
+      }
+      case 'try-sample': {
+        el.disabled = true;
+        try { setFile(await sampleFile(el.dataset.sample)); } catch (_) { toast('Hindi ma-load ang sample. Try ulit.', 'error'); el.disabled = false; }
+        break;
+      }
       case 'close-modal': closeModal(); break;
       case 'modal-backdrop': if (e.target === el) closeModal(); break;
       case 'clear-search': state.vaultQ = ''; state.vaultCat = 'ALL'; renderView(); break;
@@ -1376,7 +1699,7 @@
       case 'download-doc': downloadDoc(); break;
       case 'cp-tab': state.cpTab = el.dataset.tab; renderView(); $('#tab-' + state.cpTab)?.focus(); break;
       // scanner
-      case 'skip-upload': { resetScan(); const sc = state.scan; sc.step = 2; applyStructured({}, ''); renderView(); break; }
+      case 'skip-upload': { resetScan(); const sc = state.scan; sc.step = 2; applyStructured({}, ''); sc.manual = true; renderView(); break; }
       case 'scan-reset': resetScan(); renderView(); window.scrollTo({ top: 0 }); break;
       case 'retry-process': processFile(); break;
       case 'scan-next': goToStep3(); break;
@@ -1411,6 +1734,8 @@
     } else if (e.target.id === 'chatForm') {
       e.preventDefault();
       const i = $('#chatInput'); const q = i.value; if (state.chatBusy || !q.trim()) return; i.value = ''; ask(q);
+    } else if (e.target.id === 'editForm') {
+      e.preventDefault(); saveEdit(e.target);
     } else if (e.target.id === 'noteForm') {
       e.preventDefault();
       const title = $('#noteTitle').value.trim(), body = $('#noteBody').value.trim();
@@ -1418,10 +1743,10 @@
       const rec = {
         id: uid('note'), studentId: state.studentId, documentId: 'note-' + Date.now(), title, category: 'Class Note & Memo', referenceNo: 'NOTE',
         amountPaid: 0, balanceDue: 0, deadline: 'None', summary: body, studyNotes: [], tasks: [], verified: true,
-        createdAt: new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+        createdAt: todayLabel()
       };
       closeModal();
-      addRecord(rec).then(() => { toast('Naka-save na ang note mo.'); renderView(); });
+      addRecord(rec, { quiet: true }).then((ok) => { toast(ok ? 'Naka-save na ang note mo.' : OFFLINE_MSG, ok ? 'ok' : 'warn'); renderView(); });
     }
   });
   // Drag & drop upload
@@ -1455,6 +1780,56 @@
       state.cpTab = state.cpTab === 'payments' ? 'clearance' : 'payments'; renderView(); $('#tab-' + state.cpTab)?.focus();
     }
   });
+  async function setMock(on) {
+    try {
+      const d = await postJson('/api/config/mock', { mockMode: on });
+      state.mock = d.mockMode; renderApiMode();
+      if (state.view === 'scanner' && state.scan.step === 1) renderView();
+      toast(state.mock ? 'Mock Mode on. No credits will be used.' : 'Live mode on. Scans and AI questions now use Lumen credits.', state.mock ? 'ok' : 'warn');
+    } catch (err) { toast(err.message, 'error'); }
+  }
+  function confirmLive() {
+    openModal(`
+      <h2 class="modal-title">Switch to Live mode?</h2>
+      <p class="card-sub" style="margin-top:8px">Every scan and every AI question will call Lumen and use your credits. Questions about balance, deadlines and clearance are still answered on this device for free.</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-action="close-modal" type="button">Stay in Mock Mode</button>
+        <button class="btn btn-primary" data-action="confirm-live" type="button"><i data-lucide="zap"></i>Use Live mode</button>
+      </div>`);
+  }
+
+  // Delete with Undo. The stored photo is removed only after the Undo window has passed.
+  async function deleteRecord(id) {
+    const idx = state.records.findIndex((r) => r.id === id);
+    if (idx < 0) { closeModal(); return; }
+    const removed = state.records[idx];
+    const owner = state.studentId;
+    let undone = false;
+    state.records.splice(idx, 1);
+    closeModal(); closeDrawer(); renderView();
+    const ok = await syncRecords({ quiet: true });
+    toast(ok ? 'Natanggal na ang document.' : OFFLINE_MSG, ok ? 'ok' : 'warn', {
+      label: 'Undo',
+      fn: async () => {
+        if (state.studentId !== owner) { toast('Bumalik muna sa profile na iyon para i-undo.', 'warn'); return; }
+        undone = true;
+        state.records.splice(Math.min(idx, state.records.length), 0, removed);
+        renderView(); await syncRecords(); toast('Naibalik na ang document.');
+      }
+    });
+    setTimeout(() => {
+      if (undone || !/^\/uploads\//.test(removed.image || '')) return;
+      fetch('/api/images/' + encodeURIComponent(removed.image.split('/').pop()), { method: 'DELETE' }).catch(() => {});
+    }, 9500);
+  }
+
+  // Printable "bring this to the office" checklist
+  function printClearance() {
+    document.body.classList.add('printing-clear');
+    window.addEventListener('afterprint', () => document.body.classList.remove('printing-clear'), { once: true });
+    window.print();
+  }
+
   function closeDemo() { const p = $('#demoPop'); if (p && !p.hidden) { p.hidden = true; $('#demoBtn').setAttribute('aria-expanded', 'false'); } }
 
   function confirmReset() {

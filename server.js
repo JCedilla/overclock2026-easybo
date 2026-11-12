@@ -66,13 +66,35 @@ function extractTextFromPagePayload(pageData) {
   return JSON.stringify(root, null, 2);
 }
 
+// Every word Lumen returned, with its page and position, so a student's fix is sent for the right word.
+function collectWords(payload, cap = 4000) {
+  const out = [];
+  const root = payload?.data || payload;
+  const pages = Array.isArray(root) ? root : (root?.Pages || root?.pages || root?.Items || root?.items || [root]);
+  (Array.isArray(pages) ? pages : [pages]).forEach((p, pi) => {
+    if (!p || out.length >= cap) return;
+    const pageNumber = Number(p.PageNumber || p.pageNumber || pi + 1);
+    let words = p.Words || p.words;
+    if (!Array.isArray(words)) {
+      const lines = p.Lines || p.lines || [];
+      words = Array.isArray(lines) ? lines.flatMap((l) => l.Words || l.words || []) : [];
+    }
+    words.forEach((w, wi) => {
+      if (out.length >= cap) return;
+      const idx = w.WordIndex ?? w.wordIndex ?? w.Index ?? w.index ?? wi;
+      out.push({ pageNumber, wordIndex: Number(idx), text: String(w.Text || w.text || '') });
+    });
+  });
+  return out;
+}
+
 // ─── MOCK MODE HELPERS (zero Lumen credits) ──────────────────────
 // Mock OCR returns a realistic school paper chosen by file name. The receipt
 // deliberately contains one classic scanner misread ("2O26" with a letter O)
 // so the "Please check" flow can be demonstrated without live credits.
 function mockOcrText(fileName = '') {
   const header =
-    `PAMANTASAN NG LUNGSOD NG PASIG (PLP)\n`;
+    `SAMPLE STATE UNIVERSITY\n`;
   if (/memo|clearance|permit|notice-of-exam/i.test(fileName)) {
     return header +
       `OFFICE OF THE UNIVERSITY REGISTRAR\n` +
@@ -102,7 +124,6 @@ function mockOcrText(fileName = '') {
     `OFFICE OF THE UNIVERSITY REGISTRAR & CASHIER\n` +
     `OFFICIAL RECEIPT\n` +
     `Document Ref: OR-2O26-99412 | Date: November 12, 2026\n` +
-    `Student Name: Juan Dela Cruz (BSIT 1-A)\n` +
     `Particulars: Computer Lab & miscellaneous deposit\n` +
     `Amount Paid: PHP 1,250.00\n` +
     `Remaining Balance Due: PHP 500.00\n` +
@@ -256,6 +277,7 @@ app.post('/api/ocr/upload', upload.single('document'), async (req, res) => {
     // Step 3: Read pages with words
     let extractedText = '';
     let wordsSample = [];
+    let words = [];
     const pagesResp = await fetch(`${LUMEN_OCR_BASE}/documents/${documentId}/pages?IncludeWords=true`, {
       headers: getLumenHeaders()
     });
@@ -263,6 +285,7 @@ app.post('/api/ocr/upload', upload.single('document'), async (req, res) => {
     if (pagesResp.ok) {
       const pagesJson = await pagesResp.json();
       extractedText = extractTextFromPagePayload(pagesJson);
+      words = collectWords(pagesJson);
     }
 
     // Fallback: fetch page 1 directly if listOcrPages didn't inline text
@@ -273,14 +296,10 @@ app.post('/api/ocr/upload', upload.single('document'), async (req, res) => {
       if (page1Resp.ok) {
         const page1Json = await page1Resp.json();
         extractedText = extractTextFromPagePayload(page1Json);
-        const rawWords = page1Json?.data?.Words || page1Json?.data?.words || [];
-        wordsSample = rawWords.slice(0, 8).map((w, idx) => ({
-          pageNumber: 1,
-          wordIndex: idx,
-          text: w.Text || w.text || ''
-        }));
+        words = collectWords(page1Json);
       }
     }
+    wordsSample = words.slice(0, 8);
 
     res.json({
       mock: false,
@@ -289,7 +308,8 @@ app.post('/api/ocr/upload', upload.single('document'), async (req, res) => {
       status,
       pageCount,
       extractedText: extractedText || '(OCR completed, but no text layer was detected on page 1. You can type/edit manually below.)',
-      wordsSample
+      wordsSample,
+      words
     });
   } catch (err) {
     console.error('OCR Upload Error:', err);
@@ -327,7 +347,47 @@ app.post('/api/ocr/correct', async (req, res) => {
   }
 });
 
-// ─── 3. LUMEN AI CHAT: HELPER TO ENSURE INSTANCE & SESSION ───────
+// ─── 3. LUMEN AI CHAT: INSTANCE + ONE SESSION PER STUDENT ───────
+// Each student gets their own Q&A session, so one student's records never sit in another's
+// conversation. Organizing a document uses a fresh session so earlier documents can't leak into it.
+const chatSessions = new Map(); // `${purpose}:${studentId}` -> sessionId
+const validStudentId = (id) => typeof id === 'string' && /^[\w-]{1,40}$/.test(id) && !/^(__proto__|constructor|prototype)$/.test(id);
+
+async function openChatSession(instanceId, title) {
+  const sessResp = await fetch(`${LUMEN_CHAT_BASE}/instances/${instanceId}/sessions`, {
+    method: 'POST',
+    headers: getLumenHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ title })
+  });
+  const sessJson = await sessResp.json();
+  if (!sessResp.ok) throw new Error(sessJson?.error?.message || 'Failed to open Lumen AI Chat session');
+  return sessJson.Session.id;
+}
+
+async function sendChatMessage(key, message, { fresh = false } = {}) {
+  const { instanceId } = await ensureChatSession(false);
+  let sessionId = fresh ? null : chatSessions.get(key);
+  if (!sessionId) {
+    sessionId = await openChatSession(instanceId, `EasyBo ${key}`.slice(0, 80));
+    if (!fresh) chatSessions.set(key, sessionId);
+  }
+  const post = (sid) => fetch(`${LUMEN_CHAT_BASE}/instances/${instanceId}/sessions/${sid}/messages`, {
+    method: 'POST',
+    headers: getLumenHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ message: String(message).slice(0, 3950) })
+  });
+  let resp = await post(sessionId);
+  // A cached session can expire: open a new one and try once more
+  if (!fresh && (resp.status === 404 || resp.status === 410)) {
+    sessionId = await openChatSession(instanceId, `EasyBo ${key}`.slice(0, 80));
+    chatSessions.set(key, sessionId);
+    resp = await post(sessionId);
+  }
+  cachedSessionId = sessionId;
+  const json = await resp.json().catch(() => ({}));
+  return { resp, json, sessionId };
+}
+
 async function ensureChatSession(forceNewSession = false) {
   if (!cachedInstanceId) {
     const instResp = await fetch(`${LUMEN_CHAT_BASE}/instances`, {
@@ -365,6 +425,7 @@ async function ensureChatSession(forceNewSession = false) {
 app.post('/api/chat/organize', async (req, res) => {
   try {
     const { verifiedText, fileName } = req.body;
+    const studentId = validStudentId(req.body.studentId) ? req.body.studentId : 'guest';
     if (!verifiedText) {
       return res.status(400).json({ error: { message: 'Verified text is required.' } });
     }
@@ -373,7 +434,6 @@ app.post('/api/chat/organize', async (req, res) => {
       await sleep(1100);
       return res.json({ mock: true, structured: mockOrganize(String(verifiedText), fileName) });
     }
-    const { instanceId, sessionId } = await ensureChatSession(false);
 
     // Keep prompt under 4000 chars per OpenAPI spec
     const clippedDoc = String(verifiedText).slice(0, 2600);
@@ -383,13 +443,7 @@ app.post('/api/chat/organize', async (req, res) => {
       `{"title":"short title","category":"Receipt & Tuition | Enrollment & Clearance | Scholarship | Class Note & Memo","referenceNo":"OR or ref number or N/A","date":"YYYY-MM-DD","amountPaid":0,"balanceDue":0,"deadline":"YYYY-MM-DD or None","taglishSummary":"Clear Taglish explanation of what this paper means","studyNotes":["bullet 1","bullet 2"],"checklist":["action item 1","action item 2"]}\n\n` +
       `DOCUMENT TEXT:\n${clippedDoc}`;
 
-    const msgResp = await fetch(`${LUMEN_CHAT_BASE}/instances/${instanceId}/sessions/${sessionId}/messages`, {
-      method: 'POST',
-      headers: getLumenHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ message: promptMessage.slice(0, 3950) })
-    });
-
-    const msgJson = await msgResp.json();
+    const { resp: msgResp, json: msgJson, sessionId } = await sendChatMessage(`organize:${studentId}`, promptMessage, { fresh: true });
     if (!msgResp.ok) {
       return res.status(msgResp.status).json(msgJson);
     }
@@ -452,18 +506,12 @@ app.post('/api/chat/ask', async (req, res) => {
           : `Sample na sagot ito. Wala pa akong nakikitang documents mo, kaya mag-scan ka muna ng resibo o memo. Sa Live mode, mas detalyado at totoong sagot ang makukuha mo.`
       });
     }
-    const { instanceId, sessionId } = await ensureChatSession(false);
+    const studentId = validStudentId(req.body.studentId) ? req.body.studentId : 'guest';
     const combinedMessage = contextText
       ? `Context from my verified student records:\n${String(contextText).slice(0, 2200)}\n\nMy Question (please answer helpfully in simple Taglish/English): ${question}`
       : question;
 
-    const msgResp = await fetch(`${LUMEN_CHAT_BASE}/instances/${instanceId}/sessions/${sessionId}/messages`, {
-      method: 'POST',
-      headers: getLumenHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ message: combinedMessage.slice(0, 3950) })
-    });
-
-    const msgJson = await msgResp.json();
+    const { resp: msgResp, json: msgJson, sessionId } = await sendChatMessage(`ask:${studentId}`, combinedMessage);
     if (!msgResp.ok) {
       return res.status(msgResp.status).json(msgJson);
     }
@@ -515,9 +563,41 @@ function writeDb(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
+// ─── ORIGINAL PHOTOS / PDFs ──────────────────────────────────────
+// Kept as files (not inside vault-db.json) so record syncs stay small. File names are made here,
+// never taken from the request, so a client can't write outside the uploads folder.
+const crypto = require('crypto');
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+const UPLOAD_NAME = /^[a-z0-9]+-[a-f0-9]{12}\.(jpg|png|webp|pdf)$/;
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+app.use('/uploads', express.static(UPLOAD_DIR, {
+  setHeaders: (res) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'private, max-age=86400'); }
+}));
+
+app.post('/api/images', (req, res) => {
+  const m = String(req.body?.dataUrl || '').match(/^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/);
+  const ext = m && IMAGE_TYPES[m[1]];
+  if (!ext) return res.status(400).json({ error: { message: 'Only JPG, PNG, WebP or PDF files can be stored.' } });
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length || buf.length > 3.5 * 1024 * 1024) return res.status(413).json({ error: { message: 'File is too large to store.' } });
+  const name = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+  fs.writeFile(path.join(UPLOAD_DIR, name), buf, (err) => {
+    if (err) return res.status(500).json({ error: { message: 'Could not store the file.' } });
+    res.status(201).json({ url: `/uploads/${name}` });
+  });
+});
+
+app.delete('/api/images/:name', (req, res) => {
+  const name = String(req.params.name || '');
+  if (!UPLOAD_NAME.test(name)) return res.status(400).json({ error: { message: 'Invalid file name.' } });
+  fs.unlink(path.join(UPLOAD_DIR, name), () => res.json({ status: 'deleted' }));
+});
+
 // GET all records for a specific Student ID from the backend database
 app.get('/api/records', (req, res) => {
   const studentId = req.query.studentId || '2026-00142';
+  if (!validStudentId(studentId)) return res.status(400).json({ error: { message: 'Invalid student ID.' } });
   const db = readDb();
   res.json({ studentId, records: db[studentId] || [] });
 });
@@ -525,6 +605,8 @@ app.get('/api/records', (req, res) => {
 // POST a newly verified record to the backend database
 app.post('/api/records', (req, res) => {
   const { studentId = '2026-00142', record } = req.body;
+  if (!validStudentId(studentId)) return res.status(400).json({ error: { message: 'Invalid student ID.' } });
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return res.status(400).json({ error: { message: 'Record is required.' } });
   const db = readDb();
   if (!db[studentId]) db[studentId] = [];
   db[studentId].unshift(record);
@@ -535,6 +617,8 @@ app.post('/api/records', (req, res) => {
 // PUT/sync updated records (e.g., ticked checklist items or deleted record)
 app.put('/api/records', (req, res) => {
   const { studentId = '2026-00142', records } = req.body;
+  if (!validStudentId(studentId)) return res.status(400).json({ error: { message: 'Invalid student ID.' } });
+  if (!Array.isArray(records)) return res.status(400).json({ error: { message: 'Records must be a list.' } });
   const db = readDb();
   db[studentId] = records;
   writeDb(db);
