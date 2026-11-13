@@ -1,132 +1,285 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="light">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EasyBo Student Buddy</title>
-  <meta name="description" content="Wala nang kupas na resibo. Ilagay ang mga resibo at memo mo sa isang safe na lugar, at alamin agad kung ano ang dapat mong gawin." />
-  <meta name="theme-color" content="#FBF7EF" />
-  <link rel="icon" type="image/svg+xml" href="brand/logo.svg" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
-  <script>
-    // Apply saved theme and the welcome screen before first paint (no flash)
-    (function () {
-      var t = localStorage.getItem('easybo.theme');
-      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
-      if (!sessionStorage.getItem('easybo.in')) document.documentElement.classList.add('welcoming');
-    })();
-  </script>
-</head>
-<body>
-  <a class="skip-link" href="#viewRoot">Skip to content</a>
+  <head>
+    <!-- Page basics: character set, mobile scaling, title, search description and browser colors -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EasyBo Student Buddy</title>
+    <meta
+      name="description"
+      content="No more faded receipts. Keep your school receipts and memos in one safe place, and know right away what you need to do."
+    />
+    <meta name="theme-color" content="#FBF7EF" />
+    <link rel="icon" type="image/svg+xml" href="brand/logo.svg" />
 
-  <!-- Welcome: demo profiles, no password -->
-  <section class="welcome" id="welcome" aria-labelledby="welcomeTitle">
-    <div class="welcome-card receipt">
-      <svg class="logo-svg welcome-logo" viewBox="4 -1 32 46" width="64" height="92" role="img" aria-label="EasyBo logo">
-        <path class="logo-body" d="M8 1H32A2 2 0 0 1 34 3V43L30.5 40L27 43L23.5 40L20 43L16.5 40L13 43L9.5 40L6 43V3A2 2 0 0 1 8 1Z" />
-        <path class="logo-rule" d="M12 8H28M12 12.5H22" fill="none" />
-        <path class="logo-check" d="M12.5 24L18 29.5L28 17" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-      <h1 id="welcomeTitle" class="welcome-title">EasyBo</h1>
-      <p class="welcome-sub-brand">Student Buddy</p>
-      <p class="welcome-tag">Wala nang kupas na resibo.</p>
-      <p class="welcome-sub">Ilagay ang mga resibo at memo mo sa isang safe na lugar, at alamin agad kung ano ang dapat mong gawin.</p>
-      <div class="welcome-profiles">
-        <button class="profile-btn" type="button" data-action="enter" data-student="2026-00142">
-          <span class="avatar" aria-hidden="true">J</span>
-          <span><strong>Continue as Juan</strong><small>BSIT 1-A · demo profile</small></span>
-        </button>
-        <button class="profile-btn" type="button" data-action="enter" data-student="2026-00891">
-          <span class="avatar" aria-hidden="true">M</span>
-          <span><strong>Continue as Maria</strong><small>BSCS 2-B · demo profile</small></span>
-        </button>
-      </div>
-      <p class="welcome-note">Demo profiles lang ito. Walang password.</p>
-    </div>
-  </section>
+    <!-- Brand fonts (Fraunces for headings, Plus Jakarta Sans for text, JetBrains Mono for reference numbers) and the "Papel" theme -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
 
-  <div class="app">
-    <!-- Sidebar (tablet and desktop) -->
-    <aside class="sidebar" id="sidebar" aria-label="Primary">
-      <div class="brand">
-        <svg class="logo-svg" viewBox="4 -1 32 46" width="32" height="46" role="img" aria-label="EasyBo logo">
-          <path class="logo-body" d="M8 1H32A2 2 0 0 1 34 3V43L30.5 40L27 43L23.5 40L20 43L16.5 40L13 43L9.5 40L6 43V3A2 2 0 0 1 8 1Z" />
+    <script>
+      // Apply saved theme and the welcome screen before first paint (no flash)
+      (function () {
+        var t = localStorage.getItem("easybo.theme");
+        if (t === "dark" || t === "light")
+          document.documentElement.setAttribute("data-theme", t);
+        if (!sessionStorage.getItem("easybo.in"))
+          document.documentElement.classList.add("welcoming");
+      })();
+    </script>
+  </head>
+  <body>
+    <!-- Accessibility: lets keyboard users jump straight to the page content -->
+    <a class="skip-link" href="#viewRoot">Skip to content</a>
+
+    <!-- Welcome screen: demo profiles, no password. Shown once per browser session. -->
+    <section class="welcome" id="welcome" aria-labelledby="welcomeTitle">
+      <div class="welcome-card receipt">
+        <svg
+          class="logo-svg welcome-logo"
+          viewBox="4 -1 32 46"
+          width="64"
+          height="92"
+          role="img"
+          aria-label="EasyBo logo"
+        >
+          <path
+            class="logo-body"
+            d="M8 1H32A2 2 0 0 1 34 3V43L30.5 40L27 43L23.5 40L20 43L16.5 40L13 43L9.5 40L6 43V3A2 2 0 0 1 8 1Z"
+          />
           <path class="logo-rule" d="M12 8H28M12 12.5H22" fill="none" />
-          <path class="logo-check" d="M12.5 24L18 29.5L28 17" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+          <path
+            class="logo-check"
+            d="M12.5 24L18 29.5L28 17"
+            fill="none"
+            stroke-width="4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
-        <div>
-          <div class="brand-name">EasyBo</div>
-          <div class="brand-sub">Student Buddy</div>
+        <h1 id="welcomeTitle" class="welcome-title">EasyBo</h1>
+        <p class="welcome-sub-brand">Student Buddy</p>
+        <p class="welcome-tag">No more faded receipts.</p>
+        <p class="welcome-sub">
+          Keep your school receipts and memos in one safe place, and know right
+          away what you need to do.
+        </p>
+        <!-- Profile buttons: app.js loads the chosen student's records, then offers the tutorial -->
+        <div class="welcome-profiles">
+          <button
+            class="profile-btn"
+            type="button"
+            data-action="enter"
+            data-student="2026-00142"
+          >
+            <span class="avatar" aria-hidden="true">J</span>
+            <span
+              ><strong>Continue as Juan</strong
+              ><small>BSIT 1-A · demo profile</small></span
+            >
+          </button>
+          <button
+            class="profile-btn"
+            type="button"
+            data-action="enter"
+            data-student="2026-00891"
+          >
+            <span class="avatar" aria-hidden="true">M</span>
+            <span
+              ><strong>Continue as Maria</strong
+              ><small>BSCS 2-B · demo profile</small></span
+            >
+          </button>
         </div>
+        <p class="welcome-note">These are demo profiles. No password needed.</p>
       </div>
+    </section>
 
-      <nav class="nav" aria-label="Main">
-        <a href="#dashboard" class="nav-item" data-view="dashboard"><i data-lucide="house"></i><span>Home</span></a>
-        <a href="#scanner" class="nav-item" data-view="scanner"><i data-lucide="scan-line"></i><span>Scan</span></a>
-        <a href="#vault" class="nav-item" data-view="vault"><i data-lucide="folder"></i><span>My Documents</span></a>
-        <a href="#tracker" class="nav-item" data-view="tracker"><i data-lucide="list-checks"></i><span>Clearance &amp; Payments</span><span class="nav-count" id="navPending" hidden>0</span></a>
-        <a href="#buddy" class="nav-item" data-view="buddy"><i data-lucide="message-circle"></i><span>Ask EasyBo</span></a>
-      </nav>
-
-      <p class="sidebar-note">Wala nang kupas na resibo.</p>
-    </aside>
-
-    <div class="shell">
-      <!-- Top bar -->
-      <header class="topbar">
-        <div class="student-switch">
-          <i data-lucide="graduation-cap" aria-hidden="true"></i>
-          <label for="studentSelect" class="sr-only">Student profile</label>
-          <select id="studentSelect" aria-label="Student profile"></select>
+    <!-- App shell: sidebar, top bar and the main area where app.js draws each page -->
+    <div class="app">
+      <!-- Sidebar (tablet and desktop): logo and main navigation -->
+      <aside class="sidebar" id="sidebar" aria-label="Primary">
+        <div class="brand">
+          <svg
+            class="logo-svg"
+            viewBox="4 -1 32 46"
+            width="32"
+            height="46"
+            role="img"
+            aria-label="EasyBo logo"
+          >
+            <path
+              class="logo-body"
+              d="M8 1H32A2 2 0 0 1 34 3V43L30.5 40L27 43L23.5 40L20 43L16.5 40L13 43L9.5 40L6 43V3A2 2 0 0 1 8 1Z"
+            />
+            <path class="logo-rule" d="M12 8H28M12 12.5H22" fill="none" />
+            <path
+              class="logo-check"
+              d="M12.5 24L18 29.5L28 17"
+              fill="none"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <div>
+            <div class="brand-name">EasyBo</div>
+            <div class="brand-sub">Student Buddy</div>
+          </div>
         </div>
 
-        <div class="topbar-right">
-          <div class="popover-wrap">
-            <button class="btn btn-ghost" data-action="toggle-demo" type="button" id="demoBtn" aria-label="Demo tools" aria-haspopup="true" aria-expanded="false">
-              <i data-lucide="wrench"></i><span>Demo tools</span>
-            </button>
-            <div class="popover" id="demoPop" hidden role="dialog" aria-label="Demo tools">
-              <p class="pop-title">Demo tools</p>
-              <p class="pop-muted">For presenters. Students can ignore this.</p>
+        <!-- Main navigation: one link per page (the URL hash picks the page). The badge counts unfinished tasks. -->
+        <nav class="nav" aria-label="Main">
+          <a href="#dashboard" class="nav-item" data-view="dashboard"
+            ><i data-lucide="house"></i><span>Home</span></a
+          >
+          <a href="#scanner" class="nav-item" data-view="scanner"
+            ><i data-lucide="scan-line"></i><span>Scan</span></a
+          >
+          <a href="#vault" class="nav-item" data-view="vault"
+            ><i data-lucide="folder"></i><span>My Documents</span></a
+          >
+          <a href="#tracker" class="nav-item" data-view="tracker"
+            ><i data-lucide="list-checks"></i
+            ><span>Clearance &amp; Payments</span
+            ><span class="nav-count" id="navPending" hidden>0</span></a
+          >
+          <a href="#buddy" class="nav-item" data-view="buddy"
+            ><i data-lucide="message-circle"></i><span>Ask EasyBo</span></a
+          >
+        </nav>
 
-              <div class="pop-row">
-                <span id="apiModeLabel" class="pop-row-label">Checking…</span>
-                <button class="switch" id="mockSwitch" role="switch" aria-checked="false" aria-labelledby="apiModeLabel" data-action="toggle-mock" type="button"><span class="knob"></span></button>
-              </div>
-              <p class="pop-hint">Mock Mode uses no Lumen credits.</p>
+        <p class="sidebar-note">No more faded receipts.</p>
+      </aside>
 
-              <div class="pop-actions">
-                <button class="btn btn-ghost" data-action="load-demo" type="button"><i data-lucide="sparkles"></i>Load Demo Data</button>
-                <button class="btn btn-ghost btn-danger-text" data-action="reset-demo" type="button"><i data-lucide="rotate-ccw"></i>Reset Demo</button>
-                <button class="btn btn-ghost" id="themeBtn" data-action="toggle-theme" type="button"><i data-lucide="moon"></i><span>Dark theme</span></button>
+      <div class="shell">
+        <!-- Top bar: student profile switcher and the Demo tools button -->
+        <header class="topbar">
+          <div class="student-switch">
+            <i data-lucide="graduation-cap" aria-hidden="true"></i>
+            <label for="studentSelect" class="sr-only">Student profile</label>
+            <select id="studentSelect" aria-label="Student profile"></select>
+          </div>
+
+          <div class="topbar-right">
+            <div class="popover-wrap">
+              <button
+                class="btn btn-ghost"
+                data-action="toggle-demo"
+                type="button"
+                id="demoBtn"
+                aria-label="Demo tools"
+                aria-haspopup="true"
+                aria-expanded="false"
+              >
+                <i data-lucide="wrench"></i><span>Demo tools</span>
+              </button>
+              <!-- Demo tools popover (for presenters): Mock/Live switch, demo data, reset, theme and tutorial replay -->
+              <div
+                class="popover"
+                id="demoPop"
+                hidden
+                role="dialog"
+                aria-label="Demo tools"
+              >
+                <p class="pop-title">Demo tools</p>
+                <p class="pop-muted">
+                  For presenters. Students can ignore this.
+                </p>
+
+                <div class="pop-row">
+                  <span id="apiModeLabel" class="pop-row-label">Checking…</span>
+                  <button
+                    class="switch"
+                    id="mockSwitch"
+                    role="switch"
+                    aria-checked="false"
+                    aria-labelledby="apiModeLabel"
+                    data-action="toggle-mock"
+                    type="button"
+                  >
+                    <span class="knob"></span>
+                  </button>
+                </div>
+                <p class="pop-hint">Mock Mode uses no Lumen credits.</p>
+
+                <div class="pop-actions">
+                  <button
+                    class="btn btn-ghost"
+                    data-action="tour-replay"
+                    type="button"
+                  >
+                    <i data-lucide="compass"></i>Show tutorial
+                  </button>
+                  <button
+                    class="btn btn-ghost"
+                    data-action="load-demo"
+                    type="button"
+                  >
+                    <i data-lucide="sparkles"></i>Load Demo Data
+                  </button>
+                  <button
+                    class="btn btn-ghost btn-danger-text"
+                    data-action="reset-demo"
+                    type="button"
+                  >
+                    <i data-lucide="rotate-ccw"></i>Reset Demo
+                  </button>
+                  <button
+                    class="btn btn-ghost"
+                    id="themeBtn"
+                    data-action="toggle-theme"
+                    type="button"
+                  >
+                    <i data-lucide="moon"></i><span>Dark theme</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main id="viewRoot" class="view" tabindex="-1" aria-live="polite"></main>
+        <!-- Main area: app.js renders the current page (Home, Scan, My Documents, Clearance & Payments, Ask EasyBo) here -->
+        <main
+          id="viewRoot"
+          class="view"
+          tabindex="-1"
+          aria-live="polite"
+        ></main>
+      </div>
     </div>
-  </div>
 
-  <!-- Bottom tab bar (phones) -->
-  <nav class="tabbar" aria-label="Main">
-    <a href="#dashboard" class="tab-item" data-view="dashboard"><i data-lucide="house"></i><span>Home</span></a>
-    <a href="#scanner" class="tab-item" data-view="scanner"><i data-lucide="scan-line"></i><span>Scan</span></a>
-    <a href="#vault" class="tab-item" data-view="vault"><i data-lucide="folder"></i><span>Documents</span></a>
-    <a href="#tracker" class="tab-item" data-view="tracker"><i data-lucide="list-checks"></i><span>Clearance</span></a>
-    <a href="#buddy" class="tab-item" data-view="buddy"><i data-lucide="message-circle"></i><span>Ask</span></a>
-  </nav>
+    <!-- Bottom tab bar (phones): the same five pages as the sidebar -->
+    <nav class="tabbar" aria-label="Main">
+      <a href="#dashboard" class="tab-item" data-view="dashboard"
+        ><i data-lucide="house"></i><span>Home</span></a
+      >
+      <a href="#scanner" class="tab-item" data-view="scanner"
+        ><i data-lucide="scan-line"></i><span>Scan</span></a
+      >
+      <a href="#vault" class="tab-item" data-view="vault"
+        ><i data-lucide="folder"></i><span>Documents</span></a
+      >
+      <a href="#tracker" class="tab-item" data-view="tracker"
+        ><i data-lucide="list-checks"></i><span>Clearance</span></a
+      >
+      <a href="#buddy" class="tab-item" data-view="buddy"
+        ><i data-lucide="message-circle"></i><span>Ask</span></a
+      >
+    </nav>
 
-  <div id="drawerRoot"></div>
-  <div id="modalRoot"></div>
-  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    <!-- Layers filled by app.js: document drawer, dialogs, tutorial and toast messages -->
+    <div id="drawerRoot"></div>
+    <div id="modalRoot"></div>
+    <div id="tourRoot"></div>
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="app.js"></script>
-</body>
+    <!-- Scripts: Lucide icon library, then the app itself -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="app.js"></script>
+  </body>
 </html>
