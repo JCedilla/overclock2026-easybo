@@ -10,3 +10,4 @@ vault-db.json
 !.env.example
 *.pem
 *.key
+easybo.zip
