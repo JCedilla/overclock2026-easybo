@@ -120,28 +120,5 @@ public/brand/        Logo and favicon
 
 ---
 
-## Status and to-do for finalization
 
-**Done and tested in Mock Mode:**
 
-- **The full flow:** scan, check, save, pay, ask.
-- **Review gate and word corrections.**
-- **Data and safety:**
-  - Duplicate warning.
-  - Payment history.
-  - Edit and delete with Undo.
-  - Offline sync.
-  - Live-mode confirmation.
-- **Extras:** photo storage, calendar export, printable checklist, sample papers.
-- **Layout:** phone, tablet and desktop layouts, light and dark themes.
-
-**Still to do:**
-
-- [ ] Fill in the **partner** line above.
-- [ ] **Test Live mode** with one or two real receipts (uses credits). Check these:
-  - Fields fill in correctly.
-  - A word correction is accepted by Lumen.
-  - Ask EasyBo replies.
-- [ ] Prepare the **slides** (max 10): problem, who it's for, demo, how Lumen is used, correction feature, SDGs and partner, what's next.
-- [ ] Rehearse the demo in Mock Mode as a fallback in case the venue Wi-Fi fails.
-- [ ] Commit in small steps with clear messages. Commit history is checked.
