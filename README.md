@@ -20,9 +20,10 @@ This hits hardest for first-year and working students who don't yet know how sch
 EasyBo turns a photo of a school paper into an organized record and a to-do list.
 
 1. **Upload.** Upload a photo or PDF, or try a built-in sample paper.
-2. **Summary.** EasyBo explains what the document is about: an overview plus key points (type, issuing office, amounts, deadline, next action). The student then chooses **Save to My Documents** or **Done, don't save**.
-3. **Check.** EasyBo fills in the title, type, reference number, amounts and deadline. Anything it is unsure about is marked **Please check**. The student fixes it or confirms it with **Looks right**, and can't continue until every flag is cleared. Tapping a misread word sends the correction back to Lumen.
-4. **Save.** The record keeps the original photo, the file summary, and a checklist of what to do.
+2. **Automatic fill and save.** EasyBo fills in the title, type, reference number, amounts, deadline and checklist by itself. Lumen AI Chat organizes the text, and the server reads labels like "OR No.", "Amount Paid" and "Balance due on" to fill anything the AI missed. When nothing looks doubtful, the document is **saved to My Documents automatically**, with nothing to type.
+3. **Summary.** EasyBo explains what the document is about: an overview plus key points (type, issuing office, amounts, deadline, next action). From here the student can view it, **Review details**, scan another, or choose **Don't keep this document**.
+4. **Ask about this document.** A chat box under the document answers questions such as "How much is left to pay?" or "When is the deadline?" on the device. Other questions go to Lumen AI Chat with only that document as context.
+5. **Check (only when needed).** If a value looks misread (for example the letter O in `OR-2O26-99412`) or the paper looks like one already saved, EasyBo doesn't save it automatically. It asks the student to review it first. Doubtful fields are marked **Please check**; the student fixes them or confirms them with **Looks right**. Tapping a misread word sends the correction back to Lumen.
 
 A short **tutorial** is offered the first time a student signs in. It can be skipped, exited at any step, and replayed from **Demo tools → Show tutorial**.
 
@@ -83,9 +84,9 @@ Open **http://localhost:3000**, then choose **Continue as Juan** or **Continue a
 
 ### Two-minute demo (Mock Mode)
 
-1. Go to **Scan → Sample receipt** and read the summary.
-2. Press **Save to My Documents**.
-3. The reference number is flagged. Open **View scanned text**, tap `OR-2O26-99412`, change the letter O to a zero, and confirm.
+1. Go to **Scan → Clearance memo**. It is read, filled in and saved automatically. Ask "What do I need to do?" in **Ask about this document**.
+2. Go to **Scan → Sample receipt**. Its reference number looks misread, so EasyBo asks for a review. Press **Review and save**.
+3. Open **View scanned text**, tap `OR-2O26-99412`, change the letter O to a zero, and confirm.
 4. Press **Looks right, continue → Save to My Documents**.
 5. On **Home**, press **Mark as paid**.
 6. In **Ask EasyBo**, try "How much do I still owe?"

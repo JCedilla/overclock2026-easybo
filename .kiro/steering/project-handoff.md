@@ -42,7 +42,9 @@ You are helping a team member finish EasyBo for the OVERCLOCK 2026 hackathon. **
 ## Mock Mode
 
 - The server returns sample text by **file name**: names containing `memo|clearance|permit` → clearance memo, `scholar|grant|award` → scholarship notice, anything else → receipt. The receipt deliberately contains the misread `OR-2O26-99412` to demo the "Please check"/correction flow.
-- Scan flow is Upload → Summary → Check → Save. The tutorial (offered once per browser, replay in Demo tools) is in the "Tutorial" section of app.js.
+- Scan flow is Upload → Summary → Check → Save. A scan with no doubtful field (and no duplicate) is auto-saved (`canAutoSave` / `autoSave`); "Review details" edits that same record (`updateAutoSaved`). Empty fields are not flagged, only doubtful values.
+- Field reading: `extractFields()` in server.js reads labels from the text; in Live mode `mergeOrganized()` fills anything the AI left blank. `node -e "require('./server.js')"` loads these helpers without starting the server.
+- "Ask about this document" (`docAsk`) answers on the device first, then calls `/api/chat/ask` with `scope: "document"`. The tutorial (offered once per browser, replay in Demo tools) is in the "Tutorial" section of app.js.
 - The Scan page's sample buttons draw matching sample papers on a canvas, so the demo shows a real-looking photo.
 
 ## Testing without credits
