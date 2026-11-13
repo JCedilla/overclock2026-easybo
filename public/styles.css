@@ -4488,3 +4488,67 @@ html.welcoming .welcome,
     transition: none;
   }
 }
+
+/* ───────── Scan page: document chat ("Ask about this document") ───────── */
+/* Left column holds the preview and the chat, so the preview no longer sticks over the chat */
+.scan-left {
+  align-self: start;
+}
+.scan-left .sticky-card {
+  position: static;
+}
+.doc-chat .card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.doc-chat .card-title svg {
+  width: 20px;
+  height: 20px;
+  color: var(--brand);
+}
+.doc-chat > .card-sub {
+  margin: 4px 0 12px;
+}
+/* Conversation: scrolls inside the card so the page stays short */
+.doc-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 2px 8px;
+}
+.doc-chat-log .msg {
+  font-size: 15px;
+}
+.doc-chat-empty {
+  margin: 0;
+}
+.doc-chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.doc-chat .chat-input {
+  display: flex;
+  gap: 8px;
+}
+.doc-chat .chat-input .input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Summary step: "Long document: read in N parts" note */
+.fs-chunked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+.fs-chunked svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}

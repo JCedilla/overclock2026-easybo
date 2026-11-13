@@ -91,6 +91,10 @@
     summaryBase: null, // field values the summary was made from (drives the "Update summary" button)
     summaryBusy: false,
     summaryFailed: false,
+    autoSaved: false, // true when the document was stored automatically right after reading
+    // "Ask about this document" chat on the Scan page: [{ role: "user" | "bot", text }]
+    docChat: [],
+    docChatBusy: false,
   });
 
   // App-wide state: selected student, saved records, current page, scan, chat, filters and open drawer
@@ -279,6 +283,8 @@
         data?.message ||
         `Request failed (${res.status})`;
       console.warn(path, res.status, raw);
+      // The server already wrote a clear sentence for Lumen problems (it includes the failing step)
+      if (data?.error?.step) throw new Error(raw);
       throw new Error(plainError(raw, res.status));
     }
     return data || {};
@@ -511,7 +517,11 @@
     if (!VIEWS.includes(view)) view = "dashboard";
     closeDrawer();
     // A finished scan should not greet the student again next time they open Scan
-    if (state.view === "scanner" && view !== "scanner" && state.scan.saved)
+    if (
+      state.view === "scanner" &&
+      view !== "scanner" &&
+      (state.scan.saved || state.scan.autoSaved)
+    )
       resetScan();
     state.view = view;
     if (push && location.hash !== "#" + view)
@@ -800,8 +810,10 @@
     const current = sc.saved ? STEP_LABELS.length + 1 : sc.step;
     const stepper = STEP_LABELS.map((label, i) => {
       const n = i + 1;
-      const cls = n < current ? "done" : n === current ? "active" : "";
-      return `<li class="step ${cls}" ${n === current ? 'aria-current="step"' : ""}><span class="step-n">${n < current ? "✓" : n}</span><span>${label}</span></li>${n < STEP_LABELS.length ? '<li class="step-line" aria-hidden="true"></li>' : ""}`;
+      // An auto-saved document has already passed Check and Save, so those steps show as done
+      const done = n < current || (sc.autoSaved && n > 2 && n !== current);
+      const cls = done ? "done" : n === current ? "active" : "";
+      return `<li class="step ${cls}" ${n === current ? 'aria-current="step"' : ""}><span class="step-n">${done ? "✓" : n}</span><span>${label}</span></li>${n < STEP_LABELS.length ? '<li class="step-line" aria-hidden="true"></li>' : ""}`;
     }).join("");
     const sub = sc.saved
       ? "All done."
@@ -809,8 +821,12 @@
         ? "One moment, we're reading your document."
         : {
             1: "Take a photo of your receipt or memo, or upload a file.",
-            2: "Here's what your document says. Save it if you want to keep it.",
-            3: "Here's what we read. Compare it with your paper.",
+            2: sc.autoSaved
+              ? "We read your document, filled in the details and saved it."
+              : "Here's what your document says.",
+            3: sc.autoSaved
+              ? "Change anything that's wrong, then save your changes."
+              : "Here's what we read. Compare it with your paper.",
             4: "Almost done. Review the details, then save.",
           }[sc.step];
     const body = sc.saved
@@ -1059,9 +1075,11 @@
 
   // Scan loading message: reading the file, then preparing the summary
   const stageText = (sc) =>
-    sc.stage === "organizing"
-      ? "Preparing your document summary…"
-      : "Reading your document…";
+    sc.stage === "saving"
+      ? "Saving to My Documents…"
+      : sc.stage === "organizing"
+        ? "Filling in the details and preparing your summary…"
+        : "Reading your document…";
 
   // Scan page: the "Your document" card shown beside the summary and the form
   const previewCard = (sc) => `
@@ -1095,26 +1113,248 @@
     if (sc.processing || sc.error) return scanStep2(); // same loading and error screens as before
     const fs = sc.fileSummary;
     return `
-      <div class="split">${previewCard(sc)}
+      <div class="split">${leftColumnHtml(sc)}
         <div class="stack">
           <section class="card fs-card" aria-labelledby="fsTitle">
             <p class="eyebrow"><i data-lucide="sparkles" style="vertical-align:-3px"></i> Summary</p>
             <h2 id="fsTitle" class="card-title">What this document is about</h2>
+            ${
+              sc.chunked
+                ? `<p class="card-sub fs-chunked"><i data-lucide="layers"></i>${
+                    sc.chunked.pages > 1
+                      ? `Long document (${sc.chunked.pages} pages)`
+                      : "Long document"
+                  }: read page by page in ${sc.chunked.used} part${sc.chunked.used === 1 ? "" : "s"}${
+                    sc.chunked.total > sc.chunked.used
+                      ? `, covering pages 1-${sc.chunked.coveredTo} of ${sc.chunked.pages}`
+                      : ""
+                  }.</p>`
+                : ""
+            }
             ${
               fs
                 ? fileSummaryHtml(fs)
                 : `<div class="banner warn" role="status" style="margin-top:12px"><i data-lucide="alert-triangle"></i><div><strong>No summary available.</strong><div>We couldn't summarize this document. You can still save it and enter the details yourself.</div></div></div>`
             }
           </section>
-          <section class="card fs-choice" aria-label="What to do with this document">
-            <p class="card-sub" style="margin:0 0 16px">Want to keep this in My Documents? You'll review the details before it's saved.</p>
-            <div class="next-actions">
-              <button class="btn btn-primary btn-lg" data-action="summary-continue" type="button"><i data-lucide="folder-plus"></i>Save to My Documents</button>
-              <button class="btn btn-ghost" data-action="scan-discard" type="button">Done, don't save</button>
-            </div>
-          </section>
+          ${summaryChoiceHtml(sc)}
         </div>
       </div>`;
+  }
+
+  // Summary step, below the summary: what happened and what the student can do next.
+  //  - Auto-saved: "Saved to My Documents" with View / Review details / Scan another / Don't keep this.
+  //  - Needs review (a doubtful value or a possible duplicate): "Review and save" or "Done, don't save".
+  function summaryChoiceHtml(sc) {
+    const labels = {
+      title: "title",
+      category: "type",
+      referenceNo: "reference number",
+      amountPaid: "amount paid",
+      balanceDue: "balance due",
+      deadline: "deadline",
+    };
+    if (sc.autoSaved) {
+      const n = sc.checklist.filter((c) => c.text.trim()).length;
+      return `
+          <section class="card fs-choice" aria-label="This document was saved">
+            <div class="banner ok" role="status"><i data-lucide="check-circle-2"></i><div><strong>${sc.offline ? "Saved on this device." : "Saved to My Documents."}</strong><div>We filled in the details from your document${n ? ` and added ${n} ${n === 1 ? "step" : "steps"} to Clearance &amp; Payments` : ""}. Nothing to type.</div></div></div>
+            <div class="next-actions" style="margin-top:16px">
+              <button class="btn btn-primary btn-lg" data-action="view-saved" type="button"><i data-lucide="folder-open"></i>View in My Documents</button>
+              <button class="btn btn-ghost" data-action="summary-continue" type="button"><i data-lucide="pencil"></i>Review details</button>
+              <button class="btn btn-ghost" data-action="scan-another" type="button"><i data-lucide="scan-line"></i>Scan another</button>
+            </div>
+            <button class="link-btn" data-action="discard-saved" type="button">Don't keep this document</button>
+          </section>`;
+    }
+    const dup = findDuplicate(sc.fields, sc.manual ? "" : sc.fileName);
+    const flagged = FIELD_NAMES.filter(isFlagged);
+    const why = dup
+      ? "This looks like a document you already saved. Review it before saving a second copy."
+      : flagged.length
+        ? `We filled in the details, but please check the ${flagged.map((n) => labels[n]).join(", ")} before saving.`
+        : "Review the details, then save.";
+    return `
+          <section class="card fs-choice" aria-label="What to do with this document">
+            <p class="card-sub" style="margin:0 0 16px">${esc(why)}</p>
+            <div class="next-actions">
+              <button class="btn btn-primary btn-lg" data-action="summary-continue" type="button"><i data-lucide="folder-plus"></i>Review and save</button>
+              <button class="btn btn-ghost" data-action="scan-discard" type="button">Done, don't save</button>
+            </div>
+          </section>`;
+  }
+
+  // Scan page left column: the document preview with the "Ask about this document" chat under it
+  function leftColumnHtml(sc) {
+    return `<div class="stack scan-left">${previewCard(sc)}${docChatHtml(sc)}</div>`;
+  }
+
+  // ── Document chat: "Ask about this document" (Summary and Check steps) ──
+  // Common questions are answered from this document's details on the device (no credits);
+  // anything else is sent to Lumen AI Chat with only this document's text as context.
+  const DOC_SUGGESTIONS = [
+    "How much is left to pay?",
+    "When is the deadline?",
+    "What do I need to do?",
+  ];
+
+  // The chat card: intro, messages, suggestion chips and the question box
+  function docChatHtml(sc) {
+    if (!sc.text.trim()) return "";
+    return `
+      <section class="card doc-chat" aria-labelledby="docChatTitle">
+        <h2 id="docChatTitle" class="card-title"><i data-lucide="message-circle"></i>Ask about this document</h2>
+        <p class="card-sub">Answers come from this document only.${state.mock ? "" : " Questions outside the basics use Lumen credits."}</p>
+        <div class="doc-chat-log" id="docChatLog" role="log" aria-live="polite" aria-label="Questions about this document">${docChatLogHtml(sc)}</div>
+        <div class="chips doc-chat-chips">${DOC_SUGGESTIONS.map((q) => `<button class="chip" type="button" data-action="doc-ask" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+        <form class="chat-input" id="docChatForm">
+          <label class="sr-only" for="docChatInput">Your question about this document</label>
+          <input id="docChatInput" class="input" autocomplete="off" maxlength="300" placeholder="Ask a question about this document…" />
+          <button class="btn btn-primary" type="submit" ${sc.docChatBusy ? "disabled" : ""}><i data-lucide="send-horizontal"></i><span>Ask</span></button>
+        </form>
+      </section>`;
+  }
+
+  // The messages in the document chat (all text escaped; **bold** allowed via richText)
+  function docChatLogHtml(sc) {
+    const rows = sc.docChat
+      .map((m) =>
+        m.role === "user"
+          ? `<div class="msg-row user"><div class="msg user">${esc(m.text)}</div></div>`
+          : `<div class="msg-row bot">${avatar}<div class="msg-col"><div class="msg bot ${m.error ? "error" : ""}">${richText(m.text)}</div></div></div>`,
+      )
+      .join("");
+    const typing = sc.docChatBusy
+      ? `<div class="msg-row bot">${avatar}<div class="msg bot typing" role="status" aria-label="EasyBo is typing"><span></span><span></span><span></span></div></div>`
+      : "";
+    return rows || typing
+      ? rows + typing
+      : '<p class="card-sub doc-chat-empty">Pick a question below, or type your own.</p>';
+  }
+
+  // Redraws only the chat log (keeps the Check step form untouched while typing)
+  function refreshDocChat() {
+    const log = $("#docChatLog");
+    if (!log) return;
+    log.innerHTML = docChatLogHtml(state.scan);
+    log.scrollTop = log.scrollHeight;
+    const btn = $("#docChatForm button[type=submit]");
+    if (btn) btn.disabled = state.scan.docChatBusy;
+    icons();
+  }
+
+  // On-device answers about this one document. Returns null for open-ended questions.
+  function docLocalAnswer(q, sc) {
+    const f = sc.fields;
+    const has = (re) => re.test(q);
+    const tasks = sc.checklist.map((c) => c.text.trim()).filter(Boolean);
+    const m = dueMeta(f.deadline);
+    const due = Number(f.balanceDue) || 0,
+      paid = Number(f.amountPaid) || 0;
+    if (
+      has(
+        /what (do|should|must) i (need to |have to )?(do|submit|bring|prepare)|next step|\bsteps?\b|requirements?|to-?do|checklist/i,
+      )
+    )
+      return tasks.length
+        ? `Here's what this document asks you to do:\n${bullets(tasks)}`
+        : "This document doesn't list any steps for you.";
+    if (has(/deadline|due date|\bwhen\b|until|how long/i))
+      return parseDay(f.deadline)
+        ? `The deadline on this document is **${fmtDay(f.deadline)}** (${daysLeftText(m)}).`
+        : "This document doesn't list a deadline.";
+    if (
+      has(
+        /balance|owe|left to pay|still (need to )?pay|need to pay|have to pay|remaining|unpaid|how much.*(left|still|due)/i,
+      )
+    )
+      return due > 0
+        ? `This document shows **${peso(due)}** still to pay${parseDay(f.deadline) ? `, due ${fmtDay(f.deadline)}` : ""}.`
+        : "This document shows no balance left to pay.";
+    if (has(/paid|payment|amount|total|how much|cost|credited/i))
+      return paid > 0
+        ? `This document shows **${peso(paid)}** ${f.category === "Scholarship" ? "credited to you" : "paid"}.`
+        : "This document doesn't show a payment.";
+    if (has(/\bor\b|reference|\bref\b|receipt (no|number)|number/i))
+      return f.referenceNo
+        ? `The reference number is **${f.referenceNo}**.`
+        : "No reference number was found on this document.";
+    if (
+      has(/office|issued|who (sent|issued|gave)|from (which|what|who)|where/i)
+    ) {
+      const from = (sc.fileSummary?.keyPoints || []).find((p) =>
+        /^Issued by:/i.test(p),
+      );
+      return from
+        ? `${from.replace(/^Issued by:\s*/i, "This document was issued by the ")}.`
+        : "The issuing office isn't clear from this document.";
+    }
+    if (has(/summar|about|explain|what is this|mean/i)) {
+      const fs = sc.fileSummary;
+      return fs
+        ? `${fs.overview}${fs.keyPoints.length ? `\n${bullets(fs.keyPoints)}` : ""}`
+        : f.summary || null;
+    }
+    return null;
+  }
+
+  // Context sent to Lumen for open-ended questions: this document's details and scanned text only
+  function docContext(sc) {
+    const f = sc.fields;
+    return [
+      `Title: ${f.title}`,
+      `Type: ${f.category}`,
+      `Reference no.: ${f.referenceNo || "none"}`,
+      `Amount paid: ${peso(f.amountPaid)}`,
+      `Balance due: ${peso(f.balanceDue)}`,
+      `Deadline: ${parseDay(f.deadline) ? fmtDay(f.deadline) : "none"}`,
+      sc.fileSummary ? `Summary: ${sc.fileSummary.overview}` : "",
+      // The whole text is sent; the server picks the parts that match the question (long documents)
+      `Scanned text:\n${sc.text.slice(0, 40000)}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  // Sends one question: answered on the device when possible, otherwise by Lumen AI Chat
+  async function docAsk(question) {
+    const sc = state.scan;
+    question = String(question || "")
+      .trim()
+      .slice(0, 300);
+    if (!question || sc.docChatBusy) return;
+    sc.docChat.push({ role: "user", text: question });
+    sc.docChatBusy = true;
+    refreshDocChat();
+    try {
+      const local = docLocalAnswer(question, sc);
+      if (local) {
+        await wait(400);
+        sc.docChat.push({ role: "bot", text: local });
+      } else {
+        const data = await postJson("/api/chat/ask", {
+          question,
+          contextText: docContext(sc),
+          studentId: state.studentId,
+          scope: "document",
+        });
+        sc.docChat.push({
+          role: "bot",
+          text:
+            String(data.answer || "").trim() ||
+            "No answer was received. Try asking in a different way.",
+        });
+      }
+    } catch (e) {
+      sc.docChat.push({
+        role: "bot",
+        error: true,
+        text: `I couldn't answer that right now. ${friendlyError(e.message)}`,
+      });
+    } finally {
+      sc.docChatBusy = false;
+      if (state.scan === sc) refreshDocChat();
+    }
   }
 
   // Did the student change anything the summary talks about since it was made?
@@ -1243,9 +1483,9 @@
       );
 
     return `
-      <div class="split">${left}
+      <div class="split">${leftColumnHtml(sc)}
         <div class="stack">
-          ${dupHtml()}
+          ${sc.autoSaved ? "" : dupHtml()}
           ${bannerHtml()}
           ${compactSummaryHtml()}
           <div class="card">
@@ -1273,8 +1513,12 @@
         </div>
       </div>
       <div class="footer-bar">
-        <button class="btn btn-ghost" data-action="scan-reset" type="button"><i data-lucide="rotate-ccw"></i>Start over</button>
-        <button class="btn btn-primary" data-action="scan-next" type="button">Looks right, continue<i data-lucide="arrow-right"></i></button>
+        ${
+          sc.autoSaved
+            ? '<button class="btn btn-ghost" data-action="scan-back" type="button"><i data-lucide="arrow-left"></i>Back to summary</button>'
+            : '<button class="btn btn-ghost" data-action="scan-reset" type="button"><i data-lucide="rotate-ccw"></i>Start over</button>'
+        }
+        <button class="btn btn-primary" data-action="scan-next" type="button">${sc.autoSaved ? '<i data-lucide="save"></i>Save changes' : 'Looks right, continue<i data-lucide="arrow-right"></i>'}</button>
       </div>`;
   }
 
@@ -1288,16 +1532,17 @@
       </div>`;
   }
 
-  // A field is amber when it is empty, or the scanner looked unsure and the student has not touched it yet.
-  // The student clears a flag by fixing the value or by pressing "Looks right". A title is always required.
-  // Typed-in documents (no scan) only need a title.
+  // A field is amber ("Please check") only when the scanner read a value that looks doubtful and the
+  // student has not touched it yet. Values that simply aren't on the paper stay empty without a flag,
+  // so the student isn't asked to type what doesn't exist. A title is always required.
+  // The student clears a flag by fixing the value or by pressing "Looks right".
   function isFlagged(name) {
     const sc = state.scan;
     const empty = String(sc.fields[name] ?? "").trim() === "";
     if (name === "title") return empty;
     if (sc.manual) return false;
     if (sc.confirmed[name]) return false;
-    return empty || !!sc.uncertain[name];
+    return !!sc.uncertain[name];
   }
   // Check step banner: how many fields still need checking, or an all-clear message
   const flaggedCount = () => FIELD_NAMES.filter(isFlagged).length;
@@ -1408,6 +1653,8 @@
     };
     sc.fileSummary = normalizeFileSummary(s.fileSummary);
     if (sc.fileSummary) sc.fields.summary = sc.fileSummary.overview;
+    // Long documents are read in parts on the server: { total, used }
+    sc.chunked = s.chunked && Number(s.chunked.used) > 0 ? s.chunked : null;
     sc.summaryFailed = false;
     sc.checklist = (Array.isArray(s.checklist) ? s.checklist : []).map((t) => ({
       text: String(t),
@@ -1424,6 +1671,17 @@
     if (!Number.isFinite(paid) || !numberInText(paid, text))
       u.amountPaid = true;
     if (!Number.isFinite(due) || !numberInText(due, text)) u.balanceDue = true;
+    // Best guesses made by the server (for example a total used as the amount paid)
+    (Array.isArray(s.uncertainFields) ? s.uncertainFields : []).forEach((k) => {
+      if (FIELD_NAMES.includes(k)) u[k] = true;
+    });
+    // A receipt showing ₱0 paid while its text has amounts was probably misread: ask instead of saving ₱0
+    if (
+      sc.fields.category === "Receipt & Tuition" &&
+      !(paid > 0) &&
+      /\d[\d,]*\.\d{2}\b/.test(text)
+    )
+      u.amountPaid = true;
     sc.uncertain = u;
     sc.confirmed = {};
   }
@@ -1521,9 +1779,11 @@
     ed.text = text;
     refreshWords();
     try {
-      // Send the fix to the scanner only when we know which word it is; otherwise keep it in EasyBo only.
+      // Send the fix to Lumen only when we know exactly which word it is (its page and its
+      // 0-based index on that page). Without Lumen's word list the position in the whole text would
+      // point at the wrong word, so the fix is then kept in EasyBo only. Mock Mode always "sends".
       const w = sc.tokenMap ? sc.tokenMap[ed.index] : null;
-      if (!sc.tokenMap || w) {
+      if (w || state.mock) {
         await postJson("/api/ocr/correct", {
           documentId: sc.docId || "mock-doc",
           pageNumber: w ? Number(w.pageNumber) || 1 : 1,
@@ -1649,12 +1909,23 @@
   // Upload: checks type and size, prepares the preview and the copy kept with the record, then starts reading
   function setFile(file) {
     if (!file) return;
-    const type = file.type || "";
+    // Some browsers report no type (common for .tif); fall back to the file extension
+    const EXT_TYPE = {
+      pdf: "application/pdf",
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      webp: "image/webp",
+      tif: "image/tiff",
+      tiff: "image/tiff",
+    };
+    const type =
+      file.type ||
+      EXT_TYPE[String(file.name).split(".").pop().toLowerCase()] ||
+      "";
     if (!ACCEPT.includes(type)) {
-      toast(
-        "That file type is not supported. Please use a photo or PDF.",
-        "error",
-      );
+      // Lumen OCR reads only photos and PDFs (Word and other files return 415), so stop here
+      toast("Photos and PDFs only. Save Word files as PDF first.", "error");
       return;
     }
     if (file.size > MAX_BYTES) {
@@ -1712,8 +1983,15 @@
     const st = $("#stageText");
     if (st) st.textContent = stageText(sc);
     await organizeText();
+    // Fill in and store automatically when nothing needs checking (minimal manual input)
+    if (state.scan === sc && canAutoSave(sc)) {
+      sc.stage = "saving";
+      const st2 = $("#stageText");
+      if (st2) st2.textContent = stageText(sc);
+      await autoSave(sc);
+    }
     sc.processing = false;
-    renderView(); // the banner on the Check step is the feedback; no toast needed
+    if (state.scan === sc) renderView(); // the Summary step shows the result; no toast needed
   }
 
   // One organizer call per scan: fills the form and the file summary together (no extra Lumen credits)
@@ -1763,18 +2041,91 @@
       }
       return;
     }
+    // Already stored automatically: save the reviewed values back and return to the Summary step
+    if (sc.autoSaved) {
+      updateAutoSaved();
+      return;
+    }
     sc.step = 4;
     renderView();
     window.scrollTo({ top: 0 });
   }
 
-  // Save step: builds the record (fields, summary, checklist, photo) and saves it to My Documents
+  // Save step (manual path): saves the reviewed document to My Documents and shows the Saved screen
   async function saveScan() {
-    const sc = state.scan,
-      f = sc.fields;
+    const sc = state.scan;
     if (sc.saving) return;
     sc.saving = true;
     renderView();
+    const record = await buildRecord(sc);
+    const ok = await addRecord(record, { quiet: true });
+    sc.saving = false;
+    sc.saved = true;
+    sc.savedId = record.id;
+    sc.savedTitle = record.title;
+    sc.offline = !ok;
+    renderView();
+    window.scrollTo({ top: 0 });
+    toast(
+      ok ? "Saved. Your document is safe." : OFFLINE_MSG,
+      ok ? "ok" : "warn",
+      { label: "View document", fn: () => viewSaved(record.id) },
+    );
+  }
+
+  // Auto-save: can this scan be stored without the student checking anything?
+  // Yes when it has text and a title, no field looks doubtful, and it isn't a document already saved.
+  function canAutoSave(sc) {
+    return (
+      !sc.manual &&
+      !!sc.text.trim() &&
+      !!String(sc.fields.title || "").trim() &&
+      FIELD_NAMES.every((n) => !isFlagged(n)) &&
+      !findDuplicate(sc.fields, sc.fileName)
+    );
+  }
+
+  // Auto-save: stores the document right after it is read. The Summary step then shows it as saved,
+  // with "Review details" and "Don't keep this" for the student who wants to change or undo it.
+  async function autoSave(sc) {
+    const record = await buildRecord(sc);
+    const ok = await addRecord(record, { quiet: true });
+    sc.autoSaved = true;
+    sc.savedId = record.id;
+    sc.savedTitle = record.title;
+    sc.offline = !ok;
+  }
+
+  // Auto-saved document edited on the Check step: writes the reviewed fields back to the same record
+  async function updateAutoSaved() {
+    const sc = state.scan,
+      f = sc.fields;
+    const r = state.records.find((x) => x.id === sc.savedId);
+    if (!r) return;
+    Object.assign(r, {
+      title: String(f.title).trim(),
+      category: f.category,
+      referenceNo: String(f.referenceNo).trim() || "N/A",
+      amountPaid: Number(f.amountPaid) || 0,
+      balanceDue: Number(f.balanceDue) || 0,
+      deadline: parseDay(f.deadline) ? f.deadline : "None",
+      summary: sc.fileSummary ? sc.fileSummary.overview : f.summary,
+      rawText: sc.text.trim(),
+      corrections: Object.keys(sc.corrections).length,
+      edited: true,
+    });
+    if (sc.fileSummary) r.fileSummary = sc.fileSummary;
+    sc.savedTitle = r.title;
+    const ok = await syncRecords({ quiet: true });
+    sc.step = 2;
+    renderView();
+    window.scrollTo({ top: 0 });
+    toast(ok ? "Changes saved." : OFFLINE_MSG, ok ? "ok" : "warn");
+  }
+
+  // Builds the record to store from the current scan: fields, file summary, checklist and the original photo
+  async function buildRecord(sc) {
+    const f = sc.fields;
     const stamp = Date.now();
     const record = {
       id: uid("rec"),
@@ -1811,19 +2162,7 @@
         record.image = att.dataUrl;
       }
     }
-    const ok = await addRecord(record, { quiet: true });
-    sc.saving = false;
-    sc.saved = true;
-    sc.savedId = record.id;
-    sc.savedTitle = record.title;
-    sc.offline = !ok;
-    renderView();
-    window.scrollTo({ top: 0 });
-    toast(
-      ok ? "Saved. Your document is safe." : OFFLINE_MSG,
-      ok ? "ok" : "warn",
-      { label: "View document", fn: () => viewSaved(record.id) },
-    );
+    return record;
   }
   // Opens My Documents with this document's drawer
   function viewSaved(id) {
@@ -3344,6 +3683,18 @@
       case "update-summary":
         updateSummary();
         break;
+      // Auto-saved document: "Don't keep this document" deletes it (with Undo) and starts a fresh scan
+      case "discard-saved": {
+        const id = state.scan.savedId;
+        if (!state.scan.autoSaved || !id) break;
+        resetScan();
+        deleteRecord(id);
+        break;
+      }
+      // Document chat: suggested question chips
+      case "doc-ask":
+        docAsk(el.dataset.q);
+        break;
       case "scan-next":
         goToStep3();
         break;
@@ -3447,6 +3798,14 @@
     if (e.target.dataset && e.target.dataset.form === "word") {
       e.preventDefault();
       saveWord();
+    } else if (e.target.id === "docChatForm") {
+      // Document chat question box
+      e.preventDefault();
+      const i = $("#docChatInput");
+      if (state.scan.docChatBusy || !i.value.trim()) return;
+      const q = i.value;
+      i.value = "";
+      docAsk(q);
     } else if (e.target.id === "chatForm") {
       e.preventDefault();
       const i = $("#chatInput");
@@ -3735,7 +4094,7 @@
       view: "scanner",
       target: "scanner",
       title: "Scan a document",
-      text: "Upload a photo or PDF of a receipt or memo. EasyBo shows a summary first, then you choose whether to save it.",
+      text: "Upload a photo or PDF of a receipt or memo. EasyBo reads it, fills in the details and saves it for you. You can also ask questions about the document.",
     },
     {
       view: "vault",
