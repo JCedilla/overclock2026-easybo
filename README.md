@@ -1,6 +1,6 @@
 # EasyBo Student Buddy
 
-**Wala nang kupas na resibo.** EasyBo helps Filipino college students keep their school receipts and memos safe, understand them, and know what to do next.
+**No more faded receipts.** EasyBo helps Filipino college students keep their school receipts and memos safe, understand them, and know what to do next.
 
 Built for OVERCLOCK 2026 with **Lumen OCR** and **Lumen AI Chat**.
 
@@ -19,16 +19,19 @@ This hits hardest for first-year and working students who don't yet know how sch
 
 EasyBo turns a photo of a school paper into an organized record and a to-do list.
 
-1. **Scan.** Upload a photo or PDF, or try a built-in sample paper.
-2. **Check.** EasyBo fills in the title, type, reference number, amounts and deadline. Anything it is unsure about is marked **Pakicheck**. The student fixes it or confirms it with **Tama ito**, and can't continue until every flag is cleared. Tapping a misread word sends the correction back to Lumen.
-3. **Save.** The record keeps the original photo, a plain Taglish explanation, and a checklist of what to do.
+1. **Upload.** Upload a photo or PDF, or try a built-in sample paper.
+2. **Summary.** EasyBo explains what the document is about: an overview plus key points (type, issuing office, amounts, deadline, next action). The student then chooses **Save to My Documents** or **Done, don't save**.
+3. **Check.** EasyBo fills in the title, type, reference number, amounts and deadline. Anything it is unsure about is marked **Please check**. The student fixes it or confirms it with **Looks right**, and can't continue until every flag is cleared. Tapping a misread word sends the correction back to Lumen.
+4. **Save.** The record keeps the original photo, the file summary, and a checklist of what to do.
+
+A short **tutorial** is offered the first time a student signs in. It can be skipped, exited at any step, and replayed from **Demo tools → Show tutorial**.
 
 After saving:
 
 - **Home:** the most urgent next step, what's been paid, what's still owed, and clearance progress.
 - **My Documents:** searchable receipt-style cards. Each one opens to the original photo, payment history, Edit, Add to calendar, Print and Download.
 - **Clearance & Payments:** a payment history table, and requirements grouped by office (Cashier, Library, Registrar) with a printable checklist.
-- **Ask EasyBo:** a Taglish chat. Questions about balance, deadlines, clearance, OR numbers and payments are answered from the student's own records without calling Lumen. Open-ended questions go to Lumen AI Chat.
+- **Ask EasyBo:** a chat assistant. Questions about balance, deadlines, clearance, OR numbers and payments are answered from the student's own records without calling Lumen. Open-ended questions go to Lumen AI Chat.
 - **Safeguards:**
   - A warning when the same receipt is scanned twice.
   - Undo for edits and deletes.
@@ -36,12 +39,12 @@ After saving:
 
 ## How we use Lumen
 
-| Lumen tool | Where | What it does |
-|---|---|---|
-| **Lumen OCR**: `POST /ocr/documents`, `GET /ocr/documents/{id}`, `GET /ocr/documents/{id}/pages?IncludeWords=true` | Scan step | Reads the photo or PDF and returns the text and word positions |
-| **Lumen OCR review**: `POST /ocr/documents/{id}/review/corrections` | "View scanned text" on the Check step | Sends each word the student corrects back to Lumen |
-| **Lumen AI Chat**: sessions and messages | Check step | Turns the verified text into fields, a Taglish summary and a checklist |
-| **Lumen AI Chat** | Ask EasyBo | Answers open-ended questions using the student's saved documents |
+| Lumen tool                                                                                                         | Where                                 | What it does                                                                  |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ----------------------------------------------------------------------------- |
+| **Lumen OCR**: `POST /ocr/documents`, `GET /ocr/documents/{id}`, `GET /ocr/documents/{id}/pages?IncludeWords=true` | Scan step                             | Reads the photo or PDF and returns the text and word positions                |
+| **Lumen OCR review**: `POST /ocr/documents/{id}/review/corrections`                                                | "View scanned text" on the Check step | Sends each word the student corrects back to Lumen                            |
+| **Lumen AI Chat**: sessions and messages                                                                           | Summary and Check steps               | Turns the scanned text into fields, a file summary and a checklist (one call) |
+| **Lumen AI Chat**                                                                                                  | Ask EasyBo                            | Answers open-ended questions using the student's saved documents              |
 
 **How it saves credits:**
 
@@ -76,16 +79,17 @@ Open **http://localhost:3000**, then choose **Continue as Juan** or **Continue a
   3. Switch to Live in **Demo tools**. The app asks you to confirm first.
 - **Never commit `.env`.** It is git-ignored.
 
-**Demo tools** (top bar) has Load Demo Data, Reset Demo, the Mock/Live switch and Dark theme.
+**Demo tools** (top bar) has Show tutorial, Load Demo Data, Reset Demo, the Mock/Live switch and Dark theme.
 
 ### Two-minute demo (Mock Mode)
 
-1. Go to **Scan → Sample receipt**.
-2. The reference number is flagged. Open **View scanned text**, tap `OR-2O26-99412`, change the letter O to a zero, and confirm.
-3. Press **Looks right, continue → Save to My Documents**.
-4. On **Home**, press **Mark as paid**.
-5. In **Ask EasyBo**, try "Magkano pa ang babayaran ko?"
-6. Scan the same sample again to see the duplicate warning.
+1. Go to **Scan → Sample receipt** and read the summary.
+2. Press **Save to My Documents**.
+3. The reference number is flagged. Open **View scanned text**, tap `OR-2O26-99412`, change the letter O to a zero, and confirm.
+4. Press **Looks right, continue → Save to My Documents**.
+5. On **Home**, press **Mark as paid**.
+6. In **Ask EasyBo**, try "How much do I still owe?"
+7. Scan the same sample again to see the duplicate warning.
 
 ## Project structure
 
@@ -98,14 +102,14 @@ public/brand/        Logo and favicon
 .kiro/steering/      Brand and UX rules that Kiro follows when editing this project
 ```
 
-| Route | Purpose |
-|---|---|
-| `GET /api/config`, `POST /api/config/mock` | Mock/Live status and switch |
-| `POST /api/ocr/upload` | Upload, poll and read pages with Lumen OCR |
-| `POST /api/ocr/correct` | Send a word correction to Lumen OCR review |
-| `POST /api/chat/organize` | Structure verified text with Lumen AI Chat |
-| `POST /api/chat/ask` | Answer a question with Lumen AI Chat |
-| `GET/POST/PUT /api/records` | Load and save a student's records (`vault-db.json`) |
+| Route                                          | Purpose                                                |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| `GET /api/config`, `POST /api/config/mock`     | Mock/Live status and switch                            |
+| `POST /api/ocr/upload`                         | Upload, poll and read pages with Lumen OCR             |
+| `POST /api/ocr/correct`                        | Send a word correction to Lumen OCR review             |
+| `POST /api/chat/organize`                      | Structure verified text with Lumen AI Chat             |
+| `POST /api/chat/ask`                           | Answer a question with Lumen AI Chat                   |
+| `GET/POST/PUT /api/records`                    | Load and save a student's records (`vault-db.json`)    |
 | `POST /api/images`, `DELETE /api/images/:name` | Store or remove the original photo or PDF (`uploads/`) |
 
 ## Notes and limits
